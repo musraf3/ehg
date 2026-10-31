@@ -48,6 +48,52 @@ export const getComplianceTemplateItems = async (
   return rows
 }
 
+export const getComplianceTemplateItemsForTender =
+  async (templateId, tenderId) => {
+    const [rows] = await pool.query(
+      `
+        SELECT
+          cti.id,
+          cti.template_id,
+          cti.category,
+          cti.title,
+          cti.description,
+          cti.is_mandatory,
+          cti.sort_order,
+
+          tci.id AS tender_compliance_item_id,
+          tci.is_active AS tender_item_is_active,
+
+          CASE
+            WHEN tci.id IS NULL
+              THEN 'AVAILABLE'
+
+            WHEN tci.is_active = 1
+              THEN 'ACTIVE'
+
+            ELSE 'ARCHIVED'
+          END AS tender_state
+
+        FROM compliance_template_items cti
+
+        LEFT JOIN tender_compliance_items tci
+          ON tci.tender_id = ?
+          AND tci.source_template_item_id = cti.id
+
+        WHERE cti.template_id = ?
+          AND cti.is_active = 1
+
+        ORDER BY
+          cti.sort_order ASC,
+          cti.id ASC
+      `,
+      [tenderId, templateId]
+    )
+
+    return rows
+  }
+
+
 export const getTenderComplianceItems = async (
   tenderId
 ) => {
@@ -261,6 +307,7 @@ export const applyComplianceTemplateToTender =
     tenderId,
     templateId,
     createdBy,
+    templateItemIds,
   }) => {
     const connection =
       await pool.getConnection()
@@ -268,76 +315,168 @@ export const applyComplianceTemplateToTender =
     try {
       await connection.beginTransaction()
 
-      /*
-       * Copy template items into this tender.
-       *
-       * NOT EXISTS prevents the same template item
-       * from being copied twice to the same tender.
-       */
-      const [result] = await connection.query(
-        `
-          INSERT INTO tender_compliance_items (
-            tender_id,
-            source_template_item_id,
-            category,
-            title,
-            description,
-            is_mandatory,
-            status,
-            assigned_user_id,
-            due_date,
-            notes,
-            sort_order,
-            is_active,
-            created_by
+      let createdCount = 0
+      let restoredCount = 0
+      let skippedCount = 0
+
+      for (const templateItemId of templateItemIds) {
+        // Make sure this item really belongs
+        // to the selected active template.
+        const [templateRows] =
+          await connection.query(
+            `
+              SELECT
+                id,
+                category,
+                title,
+                description,
+                is_mandatory,
+                sort_order
+              FROM compliance_template_items
+              WHERE id = ?
+                AND template_id = ?
+                AND is_active = 1
+              LIMIT 1
+            `,
+            [
+              templateItemId,
+              templateId,
+            ]
           )
 
-          SELECT
-            ?,
-            cti.id,
-            cti.category,
-            cti.title,
-            cti.description,
-            cti.is_mandatory,
-            'NOT_STARTED',
-            NULL,
-            NULL,
-            NULL,
-            cti.sort_order,
-            1,
-            ?
+        const templateItem =
+          templateRows[0]
 
-          FROM compliance_template_items cti
+        if (!templateItem) {
+          continue
+        }
 
-          WHERE cti.template_id = ?
-            AND cti.is_active = 1
+        // Check whether this template item has
+        // already existed for this tender.
+        const [existingRows] =
+          await connection.query(
+            `
+              SELECT
+                id,
+                is_active
+              FROM tender_compliance_items
+              WHERE tender_id = ?
+                AND source_template_item_id = ?
+              ORDER BY id DESC
+              LIMIT 1
+            `,
+            [
+              tenderId,
+              templateItemId,
+            ]
+          )
 
-            AND NOT EXISTS (
-              SELECT 1
-              FROM tender_compliance_items tci
+        const existing =
+          existingRows[0]
 
-              WHERE tci.tender_id = ?
-                AND tci.source_template_item_id =
-                  cti.id
+        // Already active = do nothing.
+        if (
+          existing &&
+          Number(existing.is_active) === 1
+        ) {
+          skippedCount += 1
+          continue
+        }
+
+        // Previously archived = restore it.
+        if (existing) {
+          await connection.query(
+            `
+              UPDATE tender_compliance_items
+              SET
+                category = ?,
+                title = ?,
+                description = ?,
+                is_mandatory = ?,
+                status = 'NOT_STARTED',
+                assigned_user_id = NULL,
+                due_date = NULL,
+                notes = NULL,
+                sort_order = ?,
+                is_active = 1,
+                completed_by = NULL,
+                completed_at = NULL
+              WHERE id = ?
+                AND tender_id = ?
+                AND is_active = 0
+            `,
+            [
+              templateItem.category,
+              templateItem.title,
+              templateItem.description,
+              templateItem.is_mandatory,
+              templateItem.sort_order,
+              existing.id,
+              tenderId,
+            ]
+          )
+
+          restoredCount += 1
+          continue
+        }
+
+        // Never existed before = create it.
+        await connection.query(
+          `
+            INSERT INTO tender_compliance_items (
+              tender_id,
+              source_template_item_id,
+              category,
+              title,
+              description,
+              is_mandatory,
+              status,
+              assigned_user_id,
+              due_date,
+              notes,
+              sort_order,
+              is_active,
+              created_by
             )
+            VALUES (
+              ?,
+              ?,
+              ?,
+              ?,
+              ?,
+              ?,
+              'NOT_STARTED',
+              NULL,
+              NULL,
+              NULL,
+              ?,
+              1,
+              ?
+            )
+          `,
+          [
+            tenderId,
+            templateItem.id,
+            templateItem.category,
+            templateItem.title,
+            templateItem.description,
+            templateItem.is_mandatory,
+            templateItem.sort_order,
+            createdBy,
+          ]
+        )
 
-          ORDER BY
-            cti.sort_order ASC,
-            cti.id ASC
-        `,
-        [
-          tenderId,
-          createdBy,
-          templateId,
-          tenderId,
-        ]
-      )
+        createdCount += 1
+      }
 
       await connection.commit()
 
       return {
-        insertedCount:
-          Number(result.affectedRows || 0),
+        createdCount,
+        restoredCount,
+        skippedCount,
+        appliedCount:
+          createdCount + restoredCount,
       }
     } catch (error) {
       await connection.rollback()
@@ -345,6 +484,37 @@ export const applyComplianceTemplateToTender =
     } finally {
       connection.release()
     }
+  }
+
+  
+
+export const restoreTenderComplianceItem =
+  async ({
+    tenderId,
+    templateItemId,
+  }) => {
+    const [result] = await pool.query(
+      `
+        UPDATE tender_compliance_items
+        SET
+          is_active = 1,
+          status = 'NOT_STARTED',
+          assigned_user_id = NULL,
+          due_date = NULL,
+          notes = NULL,
+          completed_by = NULL,
+          completed_at = NULL
+        WHERE tender_id = ?
+          AND source_template_item_id = ?
+          AND is_active = 0
+      `,
+      [
+        tenderId,
+        templateItemId,
+      ]
+    )
+
+    return result.affectedRows > 0
   }
 
 export const createTenderComplianceItem = async ({

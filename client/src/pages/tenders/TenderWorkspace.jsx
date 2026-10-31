@@ -1,4 +1,4 @@
-  import { useEffect, useMemo, useState } from 'react'
+  import { useEffect, useMemo, useState,useRef } from 'react'
   import {
     AlertTriangle,
     ArrowLeft,
@@ -29,6 +29,11 @@
 
   import api from '../../services/api'
   import { useAuth } from '../../context/AuthContext'
+
+  import {
+  formatActivityDateTime,
+  formatTenderActivity,
+} from '../../utils/activityFormatter'
 
   const tabs = [
     {
@@ -274,6 +279,36 @@
 
 
 
+
+
+
+    const [
+  showComplianceTemplateModal,
+  setShowComplianceTemplateModal,
+] = useState(false)
+
+const [
+  complianceTemplateItems,
+  setComplianceTemplateItems,
+] = useState([])
+
+const [
+  complianceTemplate,
+  setComplianceTemplate,
+] = useState(null)
+
+const [
+  selectedComplianceTemplateIds,
+  setSelectedComplianceTemplateIds,
+] = useState([])
+
+const [
+  complianceTemplateLoading,
+  setComplianceTemplateLoading,
+] = useState(false)
+
+
+
     const [showComplianceModal, setShowComplianceModal] =
     useState(false)
 
@@ -342,6 +377,27 @@ const [previewUrl, setPreviewUrl] =
   useState('')
 
 
+  const [internalNotes, setInternalNotes] = useState([])
+  const internalNotesBottomRef = useRef(null)
+
+const [internalNotesLoading, setInternalNotesLoading] =
+  useState(false)
+
+const [internalNotesError, setInternalNotesError] =
+  useState('')
+
+const [internalNoteForm, setInternalNoteForm] = useState({
+  noteType: 'GENERAL_NOTE',
+  content: '',
+})
+
+const [savingInternalNote, setSavingInternalNote] =
+  useState(false)
+
+const [editingInternalNote, setEditingInternalNote] =
+  useState(null)
+
+
   const [documentForm, setDocumentForm] = useState({
     documentType: 'ORIGINAL_TENDER',
     title: '',
@@ -351,6 +407,17 @@ const [previewUrl, setPreviewUrl] =
     file: null,
   })
 
+
+
+  const [activities, setActivities] = useState([])
+const [activitiesLoading, setActivitiesLoading] =
+  useState(false)
+const [activityError, setActivityError] = useState('')
+
+
+const recentActivities = activities
+  .slice(0, 5)
+  .map(formatTenderActivity)
 
 
   const complianceReadiness = useMemo(() => {
@@ -946,11 +1013,8 @@ const closeDocumentPreview = () => {
 
    useEffect(() => {
   const shouldLoadRequirements =
-    activeTab === 'requirements' ||
-    (
-      activeTab === 'overview' &&
-      user?.role === 'EMPLOYEE'
-    )
+  activeTab === 'requirements' ||
+  activeTab === 'overview'
 
   if (!shouldLoadRequirements) {
     return
@@ -993,12 +1057,9 @@ const closeDocumentPreview = () => {
 
 
  useEffect(() => {
-  const shouldLoadCompliance =
-    activeTab === 'compliance' ||
-    (
-      activeTab === 'overview' &&
-      user?.role === 'EMPLOYEE'
-    )
+const shouldLoadCompliance =
+  activeTab === 'compliance' ||
+  activeTab === 'overview'
 
   if (!shouldLoadCompliance) {
     return
@@ -1045,48 +1106,88 @@ const closeDocumentPreview = () => {
 const shouldLoadDocumentWorkspace =
   activeTab === 'documents' ||
   activeTab === 'requirements' ||
-  activeTab === 'compliance'
+  activeTab === 'compliance' ||
+  activeTab === 'overview'
 
     if (!shouldLoadDocumentWorkspace) return
 
     const fetchDocumentWorkspace = async () => {
-      try {
-        setDocumentsLoading(true)
-        setDocumentError('')
+    try {
+      setDocumentsLoading(true)
+      setDocumentError('')
 
-        const [documentResponse, requirementResponse, complianceResponse] =
-          await Promise.all([
-            api.get(`/tenders/${id}/documents`),
-            api.get(`/tenders/${id}/requirements`),
-            api.get(`/tenders/${id}/compliance`),
-          ])
+      const response = await api.get(
+        `/tenders/${id}/documents`
+      )
 
-        setDocuments(documentResponse.data.data || [])
-        setDocumentSummary(
-          documentResponse.data.summary || {
-            total: 0,
-            originalTender: 0,
-            internalSubmission: 0,
-            requirementEvidence: 0,
-            complianceEvidence: 0,
-          }
-        )
-        setRequirements(requirementResponse.data.data || [])
-        setComplianceItems(complianceResponse.data.data || [])
-      } catch (fetchError) {
-        setDocumentError(
-          fetchError.response?.data?.message ||
-            'Unable to load tender documents.'
-        )
-      } finally {
-        setDocumentsLoading(false)
-      }
+      setDocuments(response.data.data || [])
+
+      setDocumentSummary(
+        response.data.summary || {
+          total: 0,
+          originalTender: 0,
+          internalSubmission: 0,
+          requirementEvidence: 0,
+          complianceEvidence: 0,
+        }
+      )
+    } catch (fetchError) {
+      setDocumentError(
+        fetchError.response?.data?.message ||
+          'Unable to load tender documents.'
+      )
+    } finally {
+      setDocumentsLoading(false)
     }
+  }
 
     fetchDocumentWorkspace()
   }, [activeTab, id])
 
 
+  useEffect(() => {
+  if (activeTab !== 'notes') {
+    return
+  }
+
+  const fetchInternalNotes = async () => {
+    try {
+      setInternalNotesLoading(true)
+      setInternalNotesError('')
+
+      const response = await api.get(
+        `/tenders/${id}/internal-notes`
+      )
+
+      setInternalNotes(response.data.notes || [])
+    } catch (fetchError) {
+      setInternalNotesError(
+        fetchError.response?.data?.message ||
+          'Unable to load internal notes.'
+      )
+    } finally {
+      setInternalNotesLoading(false)
+    }
+  }
+
+  fetchInternalNotes()
+}, [activeTab, id])
+
+useEffect(() => {
+  if (
+    activeTab === 'notes' &&
+    !internalNotesLoading
+  ) {
+    internalNotesBottomRef.current?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'end',
+    })
+  }
+}, [
+  activeTab,
+  internalNotes,
+  internalNotesLoading,
+])
 
   useEffect(() => {
     if (activeTab !== 'team') return
@@ -1124,40 +1225,128 @@ const shouldLoadDocumentWorkspace =
 
 
 
-  const handleApplyComplianceTemplate = async () => {
+
+
+  useEffect(() => {
+  if (!id || activeTab !== 'overview') {
+    return
+  }
+
+  const fetchActivities = async () => {
     try {
-      setApplyingComplianceTemplate(true)
-      setComplianceError('')
+      setActivitiesLoading(true)
+      setActivityError('')
 
-      const response = await api.post(
-        `/tenders/${id}/compliance/apply-template`
+      const response = await api.get(
+        `/tenders/${id}/activity`
       )
 
-      setComplianceItems(
-        response.data.data || []
-      )
+      setActivities(response.data.activities || [])
+    } catch (fetchError) {
+      setActivities([])
 
-      setComplianceSummary(
-        response.data.summary || {
-          total: 0,
-          notStarted: 0,
-          inProgress: 0,
-          completed: 0,
-          notApplicable: 0,
-          mandatory: 0,
-          overdue: 0,
-        }
-      )
-    } catch (applyError) {
-      setComplianceError(
-        applyError.response?.data?.message ||
-          'Unable to apply standard compliance template.'
+      setActivityError(
+        fetchError.response?.data?.message ||
+          'Unable to load tender activity.'
       )
     } finally {
-      setApplyingComplianceTemplate(false)
+      setActivitiesLoading(false)
     }
   }
 
+  fetchActivities()
+}, [id, activeTab])
+
+const openComplianceTemplateModal = async () => {
+  try {
+    setComplianceTemplateLoading(true)
+    setComplianceError('')
+
+    const response = await api.get(
+      `/tenders/${id}/compliance/template-options`
+    )
+
+    const items = response.data.data || []
+
+    setComplianceTemplate(
+      response.data.template || null
+    )
+
+    setComplianceTemplateItems(items)
+
+    setSelectedComplianceTemplateIds([])
+
+    setShowComplianceTemplateModal(true)
+  } catch (loadError) {
+    setComplianceError(
+      loadError.response?.data?.message ||
+        'Unable to load compliance template.'
+    )
+  } finally {
+    setComplianceTemplateLoading(false)
+  }
+}
+
+
+  const handleApplyComplianceTemplate = async () => {
+  const selectableIds = selectedComplianceTemplateIds.filter(
+    (templateItemId) => {
+      const templateItem = complianceTemplateItems.find(
+        (item) => item.id === templateItemId
+      )
+
+      return (
+        templateItem &&
+        templateItem.tender_state !== 'ACTIVE'
+      )
+    }
+  )
+
+  if (selectableIds.length === 0) {
+    setComplianceError(
+      'Please select at least one compliance item to apply.'
+    )
+    return
+  }
+
+  try {
+    setApplyingComplianceTemplate(true)
+    setComplianceError('')
+
+    const response = await api.post(
+      `/tenders/${id}/compliance/apply-template`,
+      {
+        templateItemIds: selectableIds,
+      }
+    )
+
+    setComplianceItems(response.data.data || [])
+
+    setComplianceSummary(
+      response.data.summary || {
+        total: 0,
+        notStarted: 0,
+        inProgress: 0,
+        completed: 0,
+        notApplicable: 0,
+        mandatory: 0,
+        overdue: 0,
+      }
+    )
+
+    setShowComplianceTemplateModal(false)
+    setComplianceTemplateItems([])
+    setComplianceTemplate(null)
+    setSelectedComplianceTemplateIds([])
+  } catch (applyError) {
+    setComplianceError(
+      applyError.response?.data?.message ||
+        'Unable to apply selected compliance items.'
+    )
+  } finally {
+    setApplyingComplianceTemplate(false)
+  }
+}
 
   const openCreateComplianceItem = () => {
     setEditingComplianceItem(null)
@@ -1505,6 +1694,130 @@ const handleEmployeeRequirementStatusChange = async (
   }
 }
 
+
+const handleInternalNoteSubmit = async (event) => {
+  event.preventDefault()
+
+  const content = internalNoteForm.content.trim()
+
+  if (!content) {
+    setInternalNotesError(
+      'Please enter the internal note content.'
+    )
+    return
+  }
+
+  try {
+    setSavingInternalNote(true)
+    setInternalNotesError('')
+
+    await api.post(
+      `/tenders/${id}/internal-notes`,
+      {
+        noteType: internalNoteForm.noteType,
+        content,
+      }
+    )
+
+    const response = await api.get(
+      `/tenders/${id}/internal-notes`
+    )
+
+    setInternalNotes(response.data.notes || [])
+
+    setInternalNoteForm({
+      noteType: 'GENERAL_NOTE',
+      content: '',
+    })
+  } catch (submitError) {
+    setInternalNotesError(
+      submitError.response?.data?.message ||
+        'Unable to add internal note.'
+    )
+  } finally {
+    setSavingInternalNote(false)
+  }
+}
+
+
+
+const handleInternalNoteUpdate = async () => {
+  if (!editingInternalNote) {
+    return
+  }
+
+  const content = editingInternalNote.content?.trim()
+
+  if (!content) {
+    setInternalNotesError(
+      'Internal note content cannot be empty.'
+    )
+    return
+  }
+
+  try {
+    setSavingInternalNote(true)
+    setInternalNotesError('')
+
+    await api.put(
+      `/tenders/${id}/internal-notes/${editingInternalNote.id}`,
+      {
+        noteType: editingInternalNote.note_type,
+        content,
+      }
+    )
+
+    const response = await api.get(
+      `/tenders/${id}/internal-notes`
+    )
+
+    setInternalNotes(response.data.notes || [])
+    setEditingInternalNote(null)
+  } catch (updateError) {
+    setInternalNotesError(
+      updateError.response?.data?.message ||
+        'Unable to update internal note.'
+    )
+  } finally {
+    setSavingInternalNote(false)
+  }
+}
+
+
+
+const handleInternalNoteDelete = async (note) => {
+  const confirmed = window.confirm(
+    'Are you sure you want to delete this internal note?'
+  )
+
+  if (!confirmed) {
+    return
+  }
+
+  try {
+    setInternalNotesError('')
+
+    await api.delete(
+      `/tenders/${id}/internal-notes/${note.id}`
+    )
+
+    setInternalNotes((current) =>
+      current.filter(
+        (currentNote) => currentNote.id !== note.id
+      )
+    )
+
+    if (editingInternalNote?.id === note.id) {
+      setEditingInternalNote(null)
+    }
+  } catch (deleteError) {
+    setInternalNotesError(
+      deleteError.response?.data?.message ||
+        'Unable to delete internal note.'
+    )
+  }
+}
+
     if (error || !tender) {
       return (
         <div className="rounded-2xl border border-red-200 bg-red-50 p-6">
@@ -1755,63 +2068,144 @@ const handleEmployeeRequirementStatusChange = async (
   </section>
 )}
             {/* KPI placeholders */}
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                <p className="text-sm font-medium text-slate-500">
-                  Requirements
-                </p>
+           {/* Tender Overview KPIs */}
+<div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
 
-                <p className="mt-2 text-2xl font-bold text-slate-950">
-                  —
-                </p>
+  {/* Requirements */}
+  <button
+    type="button"
+    onClick={() => setActiveTab('requirements')}
+    className="rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-[#6B3A98]/40 hover:shadow-md"
+  >
+    <div className="flex items-center justify-between gap-3">
+      <p className="text-sm font-medium text-slate-500">
+        Requirements
+      </p>
 
-                <p className="mt-1 text-xs text-slate-400">
-                  Added in Requirements phase
-                </p>
-              </div>
+      <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-purple-50 text-[#6B3A98]">
+        <ClipboardCheck size={18} />
+      </div>
+    </div>
 
-              <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                <p className="text-sm font-medium text-slate-500">
-                  Compliance
-                </p>
+    <p className="mt-3 text-2xl font-bold text-slate-950">
+      {requirementSummary.completed} / {requirementSummary.total}
+    </p>
 
-                <p className="mt-2 text-2xl font-bold text-slate-950">
-                  —
-                </p>
+    <p className="mt-1 text-xs font-medium text-slate-500">
+      {requirementSummary.total > 0
+        ? `${Math.round(
+            (requirementSummary.completed /
+              requirementSummary.total) *
+              100
+          )}% completed`
+        : 'No requirements added'}
+    </p>
 
-                <p className="mt-1 text-xs text-slate-400">
-                  Added in Compliance phase
-                </p>
-              </div>
+    {requirementSummary.overdue > 0 && (
+      <p className="mt-2 text-xs font-semibold text-red-600">
+        {requirementSummary.overdue} overdue
+      </p>
+    )}
+  </button>
 
-              <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                <p className="text-sm font-medium text-slate-500">
-                  Team Members
-                </p>
 
-                <p className="mt-2 text-2xl font-bold text-slate-950">
-                  {assignments.length}
-                </p>
+  {/* Compliance */}
+  <button
+    type="button"
+    onClick={() => setActiveTab('compliance')}
+    className="rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-[#6B3A98]/40 hover:shadow-md"
+  >
+    <div className="flex items-center justify-between gap-3">
+      <p className="text-sm font-medium text-slate-500">
+        Compliance
+      </p>
 
-                <p className="mt-1 text-xs text-slate-400">
-                  Currently assigned
-                </p>
-              </div>
+      <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-purple-50 text-[#6B3A98]">
+        <ShieldCheck size={18} />
+      </div>
+    </div>
 
-              <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                <p className="text-sm font-medium text-slate-500">
-                  Documents
-                </p>
+    <p className="mt-3 text-2xl font-bold text-slate-950">
+      {complianceSummary.completed} /{' '}
+      {Math.max(
+        complianceSummary.total -
+          complianceSummary.notApplicable,
+        0
+      )}
+    </p>
 
-                <p className="mt-2 text-2xl font-bold text-slate-950">
-                  —
-                </p>
+    <p className="mt-1 text-xs font-medium text-slate-500">
+      {complianceSummary.total -
+        complianceSummary.notApplicable >
+      0
+        ? `${complianceReadiness}% ready`
+        : 'No compliance items added'}
+    </p>
 
-                <p className="mt-1 text-xs text-slate-400">
-                  Added in Documents phase
-                </p>
-              </div>
-            </div>
+    {complianceSummary.overdue > 0 && (
+      <p className="mt-2 text-xs font-semibold text-red-600">
+        {complianceSummary.overdue} overdue
+      </p>
+    )}
+  </button>
+
+
+  {/* Team */}
+  <button
+    type="button"
+    onClick={() => setActiveTab('team')}
+    className="rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-[#6B3A98]/40 hover:shadow-md"
+  >
+    <div className="flex items-center justify-between gap-3">
+      <p className="text-sm font-medium text-slate-500">
+        Team Members
+      </p>
+
+      <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-purple-50 text-[#6B3A98]">
+        <Users size={18} />
+      </div>
+    </div>
+
+    <p className="mt-3 text-2xl font-bold text-slate-950">
+      {assignments.length}
+    </p>
+
+    <p className="mt-1 text-xs font-medium text-slate-500">
+      {assignments.length === 1
+        ? '1 employee assigned'
+        : `${assignments.length} employees assigned`}
+    </p>
+  </button>
+
+
+  {/* Documents */}
+  <button
+    type="button"
+    onClick={() => setActiveTab('documents')}
+    className="rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-[#6B3A98]/40 hover:shadow-md"
+  >
+    <div className="flex items-center justify-between gap-3">
+      <p className="text-sm font-medium text-slate-500">
+        Documents
+      </p>
+
+      <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-purple-50 text-[#6B3A98]">
+        <Files size={18} />
+      </div>
+    </div>
+
+    <p className="mt-3 text-2xl font-bold text-slate-950">
+      {documentSummary.total}
+    </p>
+
+    <p className="mt-1 text-xs font-medium text-slate-500">
+      {documentSummary.total === 1
+        ? '1 document uploaded'
+        : `${documentSummary.total} documents uploaded`}
+    </p>
+  </button>
+
+</div>
 
             <div className="grid gap-6 lg:grid-cols-2">
               {/* Tender Information */}
@@ -2021,45 +2415,297 @@ const handleEmployeeRequirementStatusChange = async (
               </section>
 
               {/* Workspace Status */}
+            {/* Readiness & Attention */}
               <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
                 <div className="border-b border-slate-100 px-5 py-4 sm:px-6">
                   <h2 className="font-bold text-slate-950">
-                    Workspace Status
+                    Readiness & Attention
                   </h2>
 
                   <p className="mt-1 text-sm text-slate-500">
-                    Operational areas that will drive
-                    tender readiness.
+                    Current preparation status and items requiring attention.
                   </p>
                 </div>
 
-                <div className="space-y-3 p-5 sm:p-6">
-                  {[
-                    'Requirements extracted',
-                    'Compliance checked',
-                    'Documents collected',
-                    'Technical / financial submission prepared',
-                    'Manager review completed',
-                    'Final approval completed',
-                    'Tender submitted',
-                  ].map((item) => (
-                    <div
-                      key={item}
-                      className="flex items-center gap-3 rounded-xl border border-slate-200 p-3"
-                    >
-                      <CheckCircle2
-                        size={18}
-                        className="shrink-0 text-slate-300"
-                      />
+                <div className="space-y-5 p-5 sm:p-6">
 
-                      <span className="text-sm font-medium text-slate-600">
-                        {item}
+                  {/* Requirements */}
+                  <div>
+                    <div className="flex items-center justify-between gap-4">
+                      <span className="text-sm font-semibold text-slate-700">
+                        Requirements
+                      </span>
+
+                      <span className="text-sm font-bold text-[#6B3A98]">
+                        {requirementSummary.total > 0
+                          ? Math.round(
+                              (requirementSummary.completed /
+                                requirementSummary.total) *
+                                100
+                            )
+                          : 0}
+                        %
                       </span>
                     </div>
-                  ))}
+
+                    <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100">
+                      <div
+                        className="h-full rounded-full bg-[#6B3A98] transition-all"
+                        style={{
+                          width: `${
+                            requirementSummary.total > 0
+                              ? Math.round(
+                                  (requirementSummary.completed /
+                                    requirementSummary.total) *
+                                    100
+                                )
+                              : 0
+                          }%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Compliance */}
+                  <div>
+                    <div className="flex items-center justify-between gap-4">
+                      <span className="text-sm font-semibold text-slate-700">
+                        Compliance
+                      </span>
+
+                      <span className="text-sm font-bold text-[#2F8CC9]">
+                        {complianceReadiness}%
+                      </span>
+                    </div>
+
+                    <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100">
+                      <div
+                        className="h-full rounded-full bg-[#2F8CC9] transition-all"
+                        style={{
+                          width: `${Math.min(
+                            Number(complianceReadiness || 0),
+                            100
+                          )}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Attention Items */}
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('requirements')}
+                      className={`rounded-xl border p-4 text-left transition hover:shadow-sm ${
+                        requirementSummary.overdue > 0
+                          ? 'border-red-200 bg-red-50'
+                          : 'border-emerald-200 bg-emerald-50'
+                      }`}
+                    >
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        Overdue Requirements
+                      </p>
+
+                      <p
+                        className={`mt-2 text-xl font-bold ${
+                          requirementSummary.overdue > 0
+                            ? 'text-red-700'
+                            : 'text-emerald-700'
+                        }`}
+                      >
+                        {requirementSummary.overdue}
+                      </p>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('compliance')}
+                      className={`rounded-xl border p-4 text-left transition hover:shadow-sm ${
+                        complianceSummary.overdue > 0
+                          ? 'border-red-200 bg-red-50'
+                          : 'border-emerald-200 bg-emerald-50'
+                      }`}
+                    >
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        Overdue Compliance
+                      </p>
+
+                      <p
+                        className={`mt-2 text-xl font-bold ${
+                          complianceSummary.overdue > 0
+                            ? 'text-red-700'
+                            : 'text-emerald-700'
+                        }`}
+                      >
+                        {complianceSummary.overdue}
+                      </p>
+                    </button>
+                  </div>
+
+                  {/* Workflow Status */}
+                  <div className="border-t border-slate-100 pt-4">
+                    <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                      Workflow Status
+                    </p>
+
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between gap-4 rounded-xl border border-slate-200 px-4 py-3">
+                        <span className="text-sm font-medium text-slate-700">
+                          Manager Review
+                        </span>
+
+                        <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">
+                          Not Started
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between gap-4 rounded-xl border border-slate-200 px-4 py-3">
+                        <span className="text-sm font-medium text-slate-700">
+                          Final Approval
+                        </span>
+
+                        <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">
+                          Not Started
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between gap-4 rounded-xl border border-slate-200 px-4 py-3">
+                        <span className="text-sm font-medium text-slate-700">
+                          Submission
+                        </span>
+
+                        <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">
+                          Not Submitted
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
                 </div>
               </section>
             </div>
+
+            {/* Recent Activity */}
+            <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+              <div className="border-b border-slate-100 px-5 py-4 sm:px-6">
+                <h2 className="font-bold text-slate-950">
+                  Recent Activity
+                </h2>
+
+                <p className="mt-1 text-sm text-slate-500">
+                  Latest changes made in this tender workspace.
+                </p>
+              </div>
+
+              <div className="p-5 sm:p-6">
+                {activitiesLoading ? (
+                  <div className="py-8 text-center">
+                    <div className="mx-auto h-7 w-7 animate-spin rounded-full border-2 border-slate-200 border-t-[#6B3A98]" />
+
+                    <p className="mt-3 text-sm text-slate-500">
+                      Loading recent activity...
+                    </p>
+                  </div>
+                ) : activityError ? (
+                  <div className="rounded-xl border border-red-200 bg-red-50 p-4">
+                    <p className="text-sm font-medium text-red-700">
+                      {activityError}
+                    </p>
+                  </div>
+                ) : recentActivities.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-slate-300 px-5 py-8 text-center">
+                    <Clock3
+                      size={24}
+                      className="mx-auto text-slate-400"
+                    />
+
+                    <p className="mt-3 text-sm font-medium text-slate-600">
+                      No activity has been recorded for this tender yet.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="divide-y divide-slate-100">
+                    {recentActivities.map((activity) => (
+                      <div
+                        key={activity.id}
+                        className="flex gap-4 py-4 first:pt-0 last:pb-0"
+                      >
+                        <div className="mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-purple-50 text-[#6B3A98]">
+                          <Clock3 size={17} />
+                        </div>
+
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+                            <p className="text-sm font-semibold leading-6 text-slate-800">
+                              {activity.title}
+                            </p>
+
+                            <p className="shrink-0 text-xs text-slate-400">
+                              {formatActivityDateTime(
+                                activity.createdAt
+                              )}
+                            </p>
+                          </div>
+
+                          {activity.subtitle && (
+                            <p className="mt-1 text-sm text-slate-500">
+                              {activity.subtitle}
+                            </p>
+                          )}
+
+                          {activity.changes.length > 0 && (
+                            <div className="mt-3 space-y-2">
+                              {activity.changes.map(
+                                (changeItem, index) => (
+                                  <div
+                                    key={`${activity.id}-change-${index}`}
+                                    className="rounded-lg bg-slate-50 px-3 py-2"
+                                  >
+                                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                                      {changeItem.label}
+                                    </p>
+
+                                    <div className="mt-1 flex flex-wrap items-center gap-2 text-sm">
+                                      <span className="text-slate-500">
+                                        {changeItem.previous}
+                                      </span>
+
+                                      <span className="font-semibold text-slate-400">
+                                        →
+                                      </span>
+
+                                      <span className="font-semibold text-slate-800">
+                                        {changeItem.next}
+                                      </span>
+                                    </div>
+                                  </div>
+                                )
+                              )}
+                            </div>
+                          )}
+
+                          {activity.messages.length > 0 && (
+                            <div className="mt-2 space-y-1">
+                              {activity.messages.map(
+                                (message, index) => (
+                                  <p
+                                    key={`${activity.id}-message-${index}`}
+                                    className="text-sm text-slate-500"
+                                  >
+                                    {message}
+                                  </p>
+                                )
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </section>
+
           </div>
         )}
 
@@ -2734,7 +3380,7 @@ const handleEmployeeRequirementStatusChange = async (
 
       <button
         type="button"
-        onClick={handleApplyComplianceTemplate}
+        onClick={openComplianceTemplateModal}
         disabled={applyingComplianceTemplate}
         className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl bg-[#6B3A98] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#5a3182] disabled:cursor-not-allowed disabled:opacity-60"
       >
@@ -2890,10 +3536,10 @@ const handleEmployeeRequirementStatusChange = async (
               the common tender compliance requirements.
             </p>
 
-            {user?.role !== 'CEO' && (
+            {['ADMIN', 'MANAGER'].includes(user?.role) && (
               <button
                 type="button"
-                onClick={handleApplyComplianceTemplate}
+                onClick={openComplianceTemplateModal}
                 disabled={applyingComplianceTemplate}
                 className="mt-5 inline-flex items-center gap-2 rounded-xl bg-[#6B3A98] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
               >
@@ -2920,6 +3566,9 @@ const handleEmployeeRequirementStatusChange = async (
     (document) =>
       document.document_type === 'INTERNAL_SUBMISSION'
   )
+
+
+  
 
   return (
     <div
@@ -3403,6 +4052,205 @@ const handleEmployeeRequirementStatusChange = async (
     </div>
   )}
 
+
+  {showComplianceTemplateModal && (
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">
+    <div className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+      
+      {/* Header */}
+      <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4 sm:px-6">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#6B3A98]">
+            Compliance Template
+          </p>
+
+          <h2 className="mt-1 text-lg font-bold text-slate-950">
+            Apply Standard Compliance Template
+          </h2>
+
+          <p className="mt-1 text-sm text-slate-500">
+            Select the compliance items required for this tender.
+          </p>
+        </div>
+
+
+        
+
+        <button
+          type="button"
+          onClick={() =>
+            setShowComplianceTemplateModal(false)
+          }
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+        >
+          <X size={18} />
+        </button>
+      </div>
+
+      {/* Template name */}
+      {complianceTemplate && (
+        <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-5 py-3 sm:px-6">
+          <p className="text-sm font-semibold text-slate-700">
+            {complianceTemplate.name}
+          </p>
+
+          <button
+            type="button"
+            onClick={() => {
+              const selectableIds = complianceTemplateItems
+                .filter(
+                  (item) => item.tender_state !== 'ACTIVE'
+                )
+                .map((item) => item.id)
+
+              const allSelected =
+                selectableIds.length > 0 &&
+                selectableIds.every((itemId) =>
+                  selectedComplianceTemplateIds.includes(itemId)
+                )
+
+              setSelectedComplianceTemplateIds(
+                allSelected ? [] : selectableIds
+              )
+            }}
+            className="text-sm font-semibold text-[#6B3A98] hover:underline"
+          >
+            {(() => {
+              const selectableIds = complianceTemplateItems
+                .filter(
+                  (item) => item.tender_state !== 'ACTIVE'
+                )
+                .map((item) => item.id)
+
+              const allSelected =
+                selectableIds.length > 0 &&
+                selectableIds.every((itemId) =>
+                  selectedComplianceTemplateIds.includes(itemId)
+                )
+
+              return allSelected ? 'Clear Selection' : 'Select All'
+            })()}
+          </button>
+        </div>
+      )}
+
+      {/* Items */}
+      <div className="flex-1 overflow-y-auto px-5 py-4 sm:px-6">
+        <div className="space-y-2">
+          {complianceTemplateItems.map((item) => {
+            const isActive =
+              item.tender_state === 'ACTIVE'
+
+            const checked =
+                isActive ||
+                selectedComplianceTemplateIds.includes(
+                  item.id
+                )
+
+            return (
+              <label
+                key={item.id}
+                className={`flex gap-3 rounded-xl border p-4 ${
+                  isActive
+                    ? 'border-emerald-200 bg-emerald-50/50'
+                    : 'border-slate-200 bg-white'
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  disabled={isActive}
+                  onChange={(event) => {
+                    const isChecked =
+                      event.target.checked
+
+                    setSelectedComplianceTemplateIds(
+                      (current) =>
+                        isChecked
+                          ? [...current, item.id]
+                          : current.filter(
+                              (itemId) =>
+                                itemId !== item.id
+                            )
+                    )
+                  }}
+                  className="mt-1 h-4 w-4 rounded border-slate-300 accent-[#6B3A98]"
+                />
+
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-sm font-semibold text-slate-900">
+                      {item.title}
+                    </p>
+
+                    {isActive && (
+                      <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-bold text-emerald-700">
+                        Already added
+                      </span>
+                    )}
+
+                    {item.tender_state ===
+                      'ARCHIVED' && (
+                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-700">
+                        Previously removed
+                      </span>
+                    )}
+                  </div>
+
+                  {item.description && (
+                    <p className="mt-1 text-xs leading-5 text-slate-500">
+                      {item.description}
+                    </p>
+                  )}
+                </div>
+              </label>
+            )
+          })}
+
+
+          
+        </div>
+      </div>
+
+      {/* Footer */}
+      <div className="flex flex-col-reverse gap-3 border-t border-slate-200 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+        <button
+          type="button"
+          onClick={() =>
+            setShowComplianceTemplateModal(false)
+          }
+          className="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+        >
+          Cancel
+        </button>
+
+        
+
+        <button
+            type="button"
+            onClick={handleApplyComplianceTemplate}
+            disabled={
+              applyingComplianceTemplate ||
+              selectedComplianceTemplateIds.filter(
+                (templateItemId) =>
+                  complianceTemplateItems.some(
+                    (item) =>
+                      item.id === templateItemId &&
+                      item.tender_state !== 'ACTIVE'
+                  )
+              ).length === 0
+            }
+            className="rounded-xl bg-[#6B3A98] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#5a3182] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {applyingComplianceTemplate
+              ? 'Applying...'
+              : 'Apply Selected'}
+          </button>
+      </div>
+    </div>
+  </div>
+)}
+
         {/* Documents */}
         {activeTab === 'documents' && (
           <div className="mt-6 space-y-6">
@@ -3740,28 +4588,28 @@ const handleEmployeeRequirementStatusChange = async (
       </select>
 
       <button
-  type="button"
-  onClick={handleAssignTeamEmployee}
-  disabled={
-    !selectedTeamEmployeeId ||
-    assigningTeamEmployee
-  }
-  className="mt-3 inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl bg-[#6B3A98] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#5a3182] disabled:cursor-not-allowed disabled:opacity-50"
->
-  <Plus size={17} />
+        type="button"
+        onClick={handleAssignTeamEmployee}
+        disabled={
+          !selectedTeamEmployeeId ||
+          assigningTeamEmployee
+        }
+        className="mt-3 inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl bg-[#6B3A98] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#5a3182] disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        <Plus size={17} />
 
-  {assigningTeamEmployee
-    ? 'Assigning...'
-    : 'Assign Employee'}
-</button>
+        {assigningTeamEmployee
+          ? 'Assigning...'
+          : 'Assign Employee'}
+      </button>
 
-      {teamError && (
-        <p className="mt-2 text-sm font-medium text-red-600">
-          {teamError}
-        </p>
-      )}
-    </div>
-  )}
+            {teamError && (
+              <p className="mt-2 text-sm font-medium text-red-600">
+                {teamError}
+              </p>
+            )}
+          </div>
+        )}
         </div>
 
         <div className="p-5 sm:p-6">
@@ -3808,37 +4656,37 @@ const handleEmployeeRequirementStatusChange = async (
                   </div>
 
                  <div className="mt-4 flex items-end justify-between gap-3 border-t border-slate-100 pt-3">
-  <div>
-    <p className="text-xs font-medium text-slate-400">
-      Assigned by
-    </p>
+                <div>
+                  <p className="text-xs font-medium text-slate-400">
+                    Assigned by
+                  </p>
 
-    <p className="mt-1 text-sm font-semibold text-slate-700">
-      {assignment.assigned_by_name || '—'}
-    </p>
-  </div>
+                  <p className="mt-1 text-sm font-semibold text-slate-700">
+                    {assignment.assigned_by_name || '—'}
+                  </p>
+                </div>
 
-  {['ADMIN', 'MANAGER'].includes(user?.role) && (
-    <button
-      type="button"
-      onClick={() =>
-        handleRemoveTeamEmployee(assignment)
-      }
-      disabled={
-        removingTeamEmployeeId ===
-        assignment.user_id
-      }
-      className="inline-flex min-h-[40px] items-center justify-center gap-2 rounded-xl border border-red-200 px-3 py-2 text-xs font-semibold text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
-    >
-      <Trash2 size={15} />
+                {['ADMIN', 'MANAGER'].includes(user?.role) && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleRemoveTeamEmployee(assignment)
+                    }
+                    disabled={
+                      removingTeamEmployeeId ===
+                      assignment.user_id
+                    }
+                    className="inline-flex min-h-[40px] items-center justify-center gap-2 rounded-xl border border-red-200 px-3 py-2 text-xs font-semibold text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <Trash2 size={15} />
 
-      {removingTeamEmployeeId ===
-      assignment.user_id
-        ? 'Removing...'
-        : 'Remove'}
-    </button>
-  )}
-</div>
+                    {removingTeamEmployeeId ===
+                    assignment.user_id
+                      ? 'Removing...'
+                      : 'Remove'}
+                  </button>
+                )}
+              </div>
                 </div>
               ))}
             </div>
@@ -3848,12 +4696,386 @@ const handleEmployeeRequirementStatusChange = async (
     </div>
   )}
 
+
+  {/* Internal Notes */}
+{activeTab === 'notes' && (
+  <div className="mt-6">
+    <section className="flex min-h-[600px] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+
+      {/* Header */}
+      <div className="border-b border-slate-100 px-5 py-4 sm:px-6">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-purple-50 text-[#6B3A98]">
+            <MessageSquareText size={20} />
+          </div>
+
+          <div>
+            <h2 className="font-bold text-slate-950">
+              Internal Notes
+            </h2>
+
+            <p className="mt-0.5 text-sm text-slate-500">
+              Team discussion, instructions, risks and
+              internal tender matters.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Error */}
+      {internalNotesError && (
+        <div className="mx-5 mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700 sm:mx-6">
+          {internalNotesError}
+        </div>
+      )}
+
+      {/* Conversation */}
+     <div className="hide-scrollbar h-[420px] overflow-y-auto bg-slate-50/60 p-4 sm:h-[500px] sm:p-6">
+        {internalNotesLoading ? (
+          <div className="flex min-h-[350px] items-center justify-center">
+            <div className="text-center">
+              <div className="mx-auto h-7 w-7 animate-spin rounded-full border-2 border-slate-200 border-t-[#6B3A98]" />
+
+              <p className="mt-3 text-sm text-slate-500">
+                Loading internal notes...
+              </p>
+            </div>
+          </div>
+        ) : internalNotes.length === 0 ? (
+          <div className="flex min-h-[350px] items-center justify-center">
+            <div className="max-w-sm text-center">
+              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-white text-slate-400 shadow-sm">
+                <MessageSquareText size={23} />
+              </div>
+
+              <p className="mt-4 font-semibold text-slate-700">
+                No internal notes yet
+              </p>
+
+              <p className="mt-1 text-sm leading-6 text-slate-500">
+                Start the internal discussion for this
+                tender below.
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="mx-auto max-w-4xl space-y-4">
+            {internalNotes.map((note) => {
+              const isOwnNote =
+                Number(note.created_by) ===
+                Number(user?.id)
+
+                const canManageNote =
+                ['ADMIN', 'MANAGER'].includes(user?.role) ||
+                (user?.role === 'EMPLOYEE' && isOwnNote)
+
+              return (
+                <div
+                  key={note.id}
+                  className={`flex ${
+                    isOwnNote
+                      ? 'justify-end'
+                      : 'justify-start'
+                  }`}
+                >
+                  <div
+                    className={`max-w-[88%] sm:max-w-[75%] ${
+                      isOwnNote
+                        ? 'items-end'
+                        : 'items-start'
+                    }`}
+                  >
+                    {/* Author */}
+                    <div
+                      className={`mb-1 flex items-center gap-2 ${
+                        isOwnNote
+                          ? 'justify-end'
+                          : 'justify-start'
+                      }`}
+                    >
+                      <div className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-200 text-[10px] font-bold text-slate-600">
+                        {note.created_by_name
+                          ?.charAt(0)
+                          ?.toUpperCase() || '?'}
+                      </div>
+
+                      <span className="text-xs font-semibold text-slate-500">
+                        {isOwnNote
+                          ? 'You'
+                          : note.created_by_name ||
+                            'Unknown user'}
+                      </span>
+                    </div>
+
+                    {/* Message bubble */}
+                    <div
+                      className={`rounded-2xl border px-4 py-3 shadow-sm ${
+                        isOwnNote
+                          ? 'rounded-br-md border-purple-200 bg-purple-50'
+                          : 'rounded-bl-md border-slate-200 bg-white'
+                      }`}
+                    >
+                      {editingInternalNote?.id !== note.id && (
+                      <div className="mb-2">
+                        <span
+                          className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+                            note.note_type === 'RISK'
+                              ? 'bg-red-100 text-red-700'
+                              : note.note_type ===
+                                  'OUTSTANDING_ISSUE'
+                                ? 'bg-amber-100 text-amber-700'
+                                : note.note_type ===
+                                    'QUESTION'
+                                  ? 'bg-blue-100 text-blue-700'
+                                  : note.note_type ===
+                                      'INSTRUCTION'
+                                    ? 'bg-purple-100 text-purple-700'
+                                    : 'bg-slate-100 text-slate-600'
+                          }`}
+                        >
+                          {note.note_type?.replaceAll(
+                            '_',
+                            ' '
+                          )}
+                        </span>
+                      </div>
+                      )}
+
+                     {editingInternalNote?.id === note.id ? (
+                      <div className="space-y-2">
+                        <select
+                          value={editingInternalNote.note_type}
+                          onChange={(event) =>
+                            setEditingInternalNote((current) => ({
+                              ...current,
+                              note_type: event.target.value,
+                            }))
+                          }
+                          disabled={savingInternalNote}
+                          className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 outline-none focus:border-[#6B3A98] focus:ring-2 focus:ring-purple-100"
+                        >
+                          <option value="GENERAL_NOTE">
+                            General Note
+                          </option>
+                          <option value="INSTRUCTION">
+                            Instruction
+                          </option>
+                          <option value="STRATEGY">
+                            Strategy
+                          </option>
+                          <option value="OBSERVATION">
+                            Observation
+                          </option>
+                          <option value="QUESTION">
+                            Question
+                          </option>
+                          <option value="RISK">
+                            Risk
+                          </option>
+                          <option value="OUTSTANDING_ISSUE">
+                            Outstanding Issue
+                          </option>
+                        </select>
+
+                        <textarea
+                          value={editingInternalNote.content}
+                          onChange={(event) =>
+                            setEditingInternalNote((current) => ({
+                              ...current,
+                              content: event.target.value,
+                            }))
+                          }
+                          rows={3}
+                          autoFocus
+                          disabled={savingInternalNote}
+                          className="w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none focus:border-[#6B3A98] focus:ring-2 focus:ring-purple-100"
+                        />
+
+                        <div className="flex justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setEditingInternalNote(null)}
+                            disabled={savingInternalNote}
+                            className="rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-500 transition hover:bg-slate-100"
+                          >
+                            Cancel
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={handleInternalNoteUpdate}
+                            disabled={
+                              savingInternalNote ||
+                              !editingInternalNote.content?.trim()
+                            }
+                            className="rounded-lg bg-[#6B3A98] px-3 py-1.5 text-xs font-bold text-white transition hover:bg-[#5b3183] disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {savingInternalNote ? 'Saving...' : 'Save'}
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="whitespace-pre-wrap break-words text-sm leading-6 text-slate-700">
+                        {note.content}
+                      </p>
+                    )}
+
+                      <p
+                        className={`mt-2 text-[11px] text-slate-400 ${
+                          isOwnNote
+                            ? 'text-right'
+                            : 'text-left'
+                        }`}
+                      >
+                       <div
+                        className={`mt-2 flex items-center gap-2 ${
+                            isOwnNote ? 'justify-end' : 'justify-start'
+                          }`}
+                        >
+                          <span className="text-[11px] text-slate-400">
+                            {formatDateTime(note.created_at)}
+                          </span>
+
+                          {canManageNote && (
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => setEditingInternalNote(note)}
+                                className="rounded-md p-1 text-slate-400 transition hover:bg-slate-100 hover:text-[#6B3A98]"
+                                title="Edit note"
+                                aria-label="Edit note"
+                              >
+                                <Pencil size={13} />
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => handleInternalNoteDelete(note)}
+                                className="rounded-md p-1 text-slate-400 transition hover:bg-red-50 hover:text-red-600"
+                                title="Delete note"
+                                aria-label="Delete note"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
+
+            <div ref={internalNotesBottomRef} />
+          </div>
+        )}
+      </div>
+
+      {/* Message Composer */}
+      {['ADMIN', 'MANAGER', 'EMPLOYEE'].includes(
+        user?.role
+      ) && (
+        <form
+          onSubmit={handleInternalNoteSubmit}
+          className="border-t border-slate-200 bg-white p-3 sm:p-4"
+        >
+          <div className="mx-auto flex max-w-4xl flex-col gap-2 sm:flex-row sm:items-end">
+
+            {/* Type */}
+            <select
+              value={internalNoteForm.noteType}
+              onChange={(event) =>
+                setInternalNoteForm((current) => ({
+                  ...current,
+                  noteType: event.target.value,
+                }))
+              }
+              disabled={savingInternalNote}
+              className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 outline-none transition focus:border-[#6B3A98] focus:ring-2 focus:ring-purple-100 sm:w-48"
+            >
+              <option value="GENERAL_NOTE">
+                General Note
+              </option>
+
+              <option value="INSTRUCTION">
+                Instruction
+              </option>
+
+              <option value="STRATEGY">
+                Strategy
+              </option>
+
+              <option value="OBSERVATION">
+                Observation
+              </option>
+
+              <option value="QUESTION">
+                Question
+              </option>
+
+              <option value="RISK">
+                Risk
+              </option>
+
+              <option value="OUTSTANDING_ISSUE">
+                Outstanding Issue
+              </option>
+            </select>
+
+            {/* Message */}
+            <textarea
+              value={internalNoteForm.content}
+              onChange={(event) =>
+                setInternalNoteForm((current) => ({
+                  ...current,
+                  content: event.target.value,
+                }))
+              }
+              placeholder="Write an internal note..."
+              rows={1}
+              disabled={savingInternalNote}
+              className="min-h-[44px] flex-1 resize-none rounded-xl border border-slate-200 px-4 py-2.5 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-[#6B3A98] focus:ring-2 focus:ring-purple-100"
+            />
+
+            {/* Send */}
+            <button
+              type="submit"
+              disabled={
+                savingInternalNote ||
+                !internalNoteForm.content.trim()
+              }
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-[#6B3A98] px-5 text-sm font-bold text-white transition hover:bg-[#5b3183] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Send size={17} />
+
+              <span className="sm:hidden">
+                {savingInternalNote
+                  ? 'Sending...'
+                  : 'Send'}
+              </span>
+            </button>
+          </div>
+        </form>
+      )}
+
+      {/* CEO read-only indicator */}
+      {user?.role === 'CEO' && (
+        <div className="border-t border-slate-200 bg-slate-50 px-5 py-3 text-center text-xs font-medium text-slate-500">
+          Internal notes are available in read-only mode.
+        </div>
+      )}
+    </section>
+  </div>
+)}
+
         {/* Placeholder tabs */}
       {activeTab !== 'overview' &&
     activeTab !== 'requirements' &&
     activeTab !== 'compliance' &&
     activeTab !== 'documents' && 
-        activeTab !== 'team' && (
+        activeTab !== 'team' &&
+        activeTab !== 'notes' &&  (
           <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm sm:p-12">
             <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-[#6B3A98]/10 text-[#6B3A98]">
               <ActiveTabIcon size={25} />

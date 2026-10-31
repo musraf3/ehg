@@ -14,6 +14,10 @@ import pool from '../config/db.js'
 
 import { findUserById } from '../models/userModel.js'
 
+import {
+  createTenderActivity,
+} from '../models/tenderActivityModel.js'
+
 const allowedRequirementStatuses = [
   'NOT_STARTED',
   'IN_PROGRESS',
@@ -249,6 +253,23 @@ export const createRequirement = async (
         requirementId
       )
 
+    await createTenderActivity({
+          tenderId,
+          userId: req.user.id,
+          actionType: 'REQUIREMENT_CREATED',
+          entityType: 'REQUIREMENT',
+          entityId: requirementId,
+          description: `Requirement "${requirement.title}" was created.`,
+          metadata: {
+            requirementId,
+            title: requirement.title,
+            category: requirement.category,
+            status: requirement.status,
+            assignedUserId:
+              requirement.assigned_user_id || null,
+          },
+        })
+
     return res.status(201).json({
       success: true,
       message:
@@ -468,6 +489,60 @@ export const updateRequirement = async (
         requirementId
       )
 
+
+    const requirementChanges = {
+  previousTitle: existingRequirement.title,
+  newTitle: updatedRequirement.title,
+
+  previousCategory: existingRequirement.category,
+  newCategory: updatedRequirement.category,
+
+  descriptionChanged:
+    (existingRequirement.description || '') !==
+    (updatedRequirement.description || ''),
+
+  previousMandatory:
+    Number(existingRequirement.is_mandatory) === 1,
+  newMandatory:
+    Number(updatedRequirement.is_mandatory) === 1,
+
+  previousStatus: existingRequirement.status,
+  newStatus: updatedRequirement.status,
+
+  previousAssignedUserId:
+    existingRequirement.assigned_user_id || null,
+  previousAssignedUserName:
+    existingRequirement.assigned_user_name || null,
+
+  newAssignedUserId:
+    updatedRequirement.assigned_user_id || null,
+  newAssignedUserName:
+    updatedRequirement.assigned_user_name || null,
+
+  previousDueDate:
+    existingRequirement.due_date || null,
+  newDueDate:
+    updatedRequirement.due_date || null,
+
+  previousSortOrder:
+    Number(existingRequirement.sort_order ?? 0),
+  newSortOrder:
+    Number(updatedRequirement.sort_order ?? 0),
+}
+
+await createTenderActivity({
+  tenderId,
+  userId: req.user.id,
+  actionType: 'REQUIREMENT_UPDATED',
+  entityType: 'REQUIREMENT',
+  entityId: requirementId,
+  description: `Requirement "${updatedRequirement.title}" was updated.`,
+  metadata: {
+    requirementId,
+    ...requirementChanges,
+  },
+})
+
     return res.status(200).json({
       success: true,
       message:
@@ -593,6 +668,23 @@ export const updateEmployeeRequirementProgress = async (
         requirementId
       )
 
+    await createTenderActivity({
+        tenderId,
+        userId: req.user.id,
+        actionType: 'REQUIREMENT_PROGRESS_UPDATED',
+        entityType: 'REQUIREMENT',
+        entityId: requirementId,
+        description:
+          `Requirement "${updatedRequirement.title}" status changed from ` +
+          `${requirement.status} to ${updatedRequirement.status}.`,
+        metadata: {
+          requirementId,
+          title: updatedRequirement.title,
+          previousStatus: requirement.status,
+          newStatus: updatedRequirement.status,
+        },
+      })
+
     return res.status(200).json({
       success: true,
       message:
@@ -679,6 +771,24 @@ await pool.execute(
   `,
   [tenderId, requirementId]
 )
+
+
+await createTenderActivity({
+  tenderId,
+  userId: req.user.id,
+  actionType: 'REQUIREMENT_ARCHIVED',
+  entityType: 'REQUIREMENT',
+  entityId: requirementId,
+  description: `Requirement "${requirement.title}" was archived.`,
+  metadata: {
+    requirementId,
+    title: requirement.title,
+    category: requirement.category,
+    status: requirement.status,
+    assignedUserId:
+      requirement.assigned_user_id || null,
+  },
+})
 
     return res.status(200).json({
       success: true,

@@ -104,6 +104,10 @@ function App() {
     path="/ceo/dashboard"
     element={<CEODashboard />}
   />
+  <Route
+  path="/ceo/users"
+  element={<UsersPage />}
+/>
 
   <Route
     path="/ceo/tenders"

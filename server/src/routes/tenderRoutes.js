@@ -25,7 +25,8 @@ import {
   createComplianceItem,
   updateComplianceItem,
   removeComplianceItem,
-  updateEmployeeComplianceProgress
+  updateEmployeeComplianceProgress,
+  getComplianceTemplateOptions,
 } from '../controllers/tenderComplianceController.js'
 
 import {
@@ -45,6 +46,19 @@ import {
   removeTenderDocument,
   previewTenderDocument
 } from '../controllers/tenderDocumentController.js'
+
+import {
+  listTenderInternalNotes,
+  addTenderInternalNote,
+  editTenderInternalNote,
+  deleteTenderInternalNote,
+} from '../controllers/tenderInternalNoteController.js'
+
+
+
+import {
+  listTenderActivities,
+} from '../controllers/tenderActivityController.js'
 
 import {
   tenderDocumentUpload,
@@ -112,13 +126,6 @@ router.put(
   updateRequirement
 )
 
-// ADMIN + MANAGER can remove requirements
-router.delete(
-  '/:tenderId/requirements/:requirementId',
-  requireRole('ADMIN', 'MANAGER'),
-  removeRequirement
-)
-
 
 router.get(
   '/:tenderId/compliance',
@@ -130,6 +137,15 @@ router.get(
   ),
   requireTenderAccess,
   listTenderCompliance
+)
+
+router.get(
+  '/:tenderId/compliance/template-options',
+  requireRole(
+    'ADMIN',
+    'MANAGER'
+  ),
+  getComplianceTemplateOptions
 )
 
 router.post(
@@ -162,7 +178,6 @@ router.patch(
   requireTenderAccess,
   updateEmployeeComplianceProgress
 )
-
 
 // --------------------------------------------------
 // Tender Documents
@@ -245,6 +260,74 @@ router.delete(
   requireTenderAccess,
   removeTenderDocument
 )
+
+//tender internal notes
+//tender internal notes
+router.get(
+  '/:tenderId/internal-notes',
+  requireRole(
+    'ADMIN',
+    'CEO',
+    'MANAGER',
+    'EMPLOYEE'
+  ),
+  requireTenderAccess,
+  listTenderInternalNotes
+)
+
+router.post(
+  '/:tenderId/internal-notes',
+  requireRole(
+    'ADMIN',
+    'MANAGER',
+    'EMPLOYEE'
+  ),
+  requireTenderAccess,
+  addTenderInternalNote
+)
+
+router.put(
+  '/:tenderId/internal-notes/:noteId',
+  requireRole(
+    'ADMIN',
+    'MANAGER',
+    'EMPLOYEE'
+  ),
+  requireTenderAccess,
+  editTenderInternalNote
+)
+router.delete(
+  '/:tenderId/internal-notes/:noteId',
+  requireRole(
+    'ADMIN',
+    'MANAGER',
+    'EMPLOYEE'
+  ),
+  requireTenderAccess,
+  deleteTenderInternalNote
+)
+
+
+
+
+
+//tender activity
+
+router.get(
+  '/:tenderId/activity',
+  requireRole(
+    'ADMIN',
+    'CEO',
+    'MANAGER',
+    'EMPLOYEE'
+  ),
+  requireTenderAccess,
+  listTenderActivities
+)
+
+
+
+
 
 // ADMIN + CEO +MANAGER can view tender details
 router.get(

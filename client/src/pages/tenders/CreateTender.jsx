@@ -236,6 +236,9 @@ const CreateTender = () => {
   const [internalOwners, setInternalOwners] =
     useState([])
 
+    const [loadingOwners, setLoadingOwners] =
+  useState(false)
+
   const [loadingOptions, setLoadingOptions] =
     useState(true)
 
@@ -243,6 +246,10 @@ const CreateTender = () => {
     useState(false)
 
   const [error, setError] = useState('')
+
+
+  const [fieldErrors, setFieldErrors] =
+  useState({})
 
   const tenderListPath =
     user?.role === 'ADMIN'
@@ -254,21 +261,14 @@ const CreateTender = () => {
       try {
         setLoadingOptions(true)
 
-        const [
-          companiesResponse,
-          ownersResponse,
-        ] = await Promise.all([
-          api.get('/companies'),
-          api.get('/tenders/internal-owners'),
-        ])
+      const companiesResponse = await api.get('/companies')
 
         const companiesData =
           companiesResponse.data?.data ||
           companiesResponse.data?.companies ||
           []
 
-        const ownersData =
-          ownersResponse.data?.owners || []
+   
 
         setCompanies(
           Array.isArray(companiesData)
@@ -279,11 +279,7 @@ const CreateTender = () => {
             : []
         )
 
-        setInternalOwners(
-          Array.isArray(ownersData)
-            ? ownersData
-            : []
-        )
+       
       } catch (loadError) {
         console.error(
           'Unable to load tender form options:',
@@ -292,7 +288,7 @@ const CreateTender = () => {
 
         setError(
           loadError.response?.data?.message ||
-            'Unable to load companies or internal owners.'
+            'Unable to load companies.'
         )
       } finally {
         setLoadingOptions(false)
@@ -301,6 +297,54 @@ const CreateTender = () => {
 
     loadFormOptions()
   }, [])
+
+
+
+  useEffect(() => {
+  const loadInternalOwners = async () => {
+    if (!form.companyId) {
+      setInternalOwners([])
+      return
+    }
+
+    try {
+      setLoadingOwners(true)
+      setError('')
+
+      const response = await api.get(
+        '/tenders/internal-owners',
+        {
+          params: {
+            companyId: form.companyId,
+          },
+        }
+      )
+
+      const owners =
+        response.data?.owners || []
+
+      setInternalOwners(
+        Array.isArray(owners) ? owners : []
+      )
+    } catch (loadError) {
+      console.error(
+        'Unable to load internal owners:',
+        loadError
+      )
+
+      setInternalOwners([])
+
+      setError(
+        loadError.response?.data?.message ||
+          'Unable to load internal owners for the selected company.'
+      )
+    } finally {
+      setLoadingOwners(false)
+    }
+  }
+
+  loadInternalOwners()
+}, [form.companyId])
 
   const selectedCompany = useMemo(
     () =>
@@ -323,13 +367,31 @@ const CreateTender = () => {
   )
 
   const handleChange = (event) => {
-    const { name, value } = event.target
+  const { name, value } = event.target
 
+  if (name === 'companyId') {
     setForm((current) => ({
       ...current,
-      [name]: value,
+      companyId: value,
+      internalOwnerId: '',
     }))
+
+    setInternalOwners([])
+    return
   }
+
+  if (fieldErrors[name]) {
+  setFieldErrors((current) => ({
+    ...current,
+    [name]: '',
+  }))
+}
+
+  setForm((current) => ({
+    ...current,
+    [name]: value,
+  }))
+}
 
   const formattedTenderValue = useMemo(() => {
     if (
@@ -361,14 +423,56 @@ const CreateTender = () => {
   const handleSubmit = async (event) => {
     event.preventDefault()
 
-    setError('')
+   setError('')
 
-    if (!form.companyId) {
-      setError(
-        'Please select the company responsible for this tender.'
-      )
-      return
-    }
+const validationErrors = {}
+
+if (!form.companyId) {
+  validationErrors.companyId =
+    'Please select the company responsible for this tender.'
+}
+
+if (!form.referenceNo.trim()) {
+  validationErrors.referenceNo =
+    'Tender reference number is required.'
+}
+
+if (!form.title.trim()) {
+  validationErrors.title =
+    'Tender title is required.'
+}
+
+if (!form.internalOwnerId) {
+  validationErrors.internalOwnerId =
+    'Please select an Internal Tender Owner.'
+}
+
+if (Object.keys(validationErrors).length > 0) {
+  setFieldErrors(validationErrors)
+
+  const fieldOrder = [
+    'companyId',
+    'referenceNo',
+    'title',
+    'internalOwnerId',
+  ]
+
+  const firstInvalidField =
+    fieldOrder.find(
+      (field) => validationErrors[field]
+    )
+
+  document
+    .getElementById(firstInvalidField)
+    ?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'center',
+    })
+
+  return
+}
+
+setFieldErrors({})
 
     if (!form.referenceNo.trim()) {
       setError(
@@ -595,7 +699,11 @@ const CreateTender = () => {
                         value={form.companyId}
                         onChange={handleChange}
                         disabled={loadingOptions}
-                        className={`${selectClass} pl-10`}
+                       className={`${selectClass} pl-10 ${
+                        fieldErrors.companyId
+                          ? 'border-red-400 focus:border-red-500 focus:ring-red-100'
+                          : ''
+                      }`}
                       >
                         <option value="">
                           {loadingOptions
@@ -618,6 +726,11 @@ const CreateTender = () => {
                         )}
                       </select>
                     </div>
+                    {fieldErrors.companyId && (
+                    <p className="mt-1.5 text-xs font-medium text-red-600">
+                      {fieldErrors.companyId}
+                    </p>
+                  )}
                   </div>
 
                   <div>
@@ -635,8 +748,18 @@ const CreateTender = () => {
                       value={form.referenceNo}
                       onChange={handleChange}
                       placeholder="e.g. EHG-2026-011"
-                      className={inputClass}
+                     className={`${inputClass} ${
+                      fieldErrors.referenceNo
+                        ? 'border-red-400 focus:border-red-500 focus:ring-red-100'
+                        : ''
+                    }`}
                     />
+
+                    {fieldErrors.referenceNo && (
+                    <p className="mt-1.5 text-xs font-medium text-red-600">
+                      {fieldErrors.referenceNo}
+                    </p>
+                  )}
                   </div>
                 </div>
 
@@ -655,8 +778,17 @@ const CreateTender = () => {
                     value={form.title}
                     onChange={handleChange}
                     placeholder="Enter the official tender title"
-                    className={inputClass}
+                   className={`${inputClass} ${
+                  fieldErrors.title
+                    ? 'border-red-400 focus:border-red-500 focus:ring-red-100'
+                    : ''
+                }`}
                   />
+                  {fieldErrors.title && (
+                  <p className="mt-1.5 text-xs font-medium text-red-600">
+                    {fieldErrors.title}
+                  </p>
+                )}
                 </div>
 
                 <div className="mt-5 grid gap-5 md:grid-cols-2">
@@ -854,7 +986,7 @@ const CreateTender = () => {
               <div className="p-5 sm:p-6">
                 <div className="grid gap-5 md:grid-cols-2">
                   <div>
-                    <FieldLabel htmlFor="internalOwnerId">
+                    <FieldLabel htmlFor="internalOwnerId" required>
                       Internal Tender Owner
                     </FieldLabel>
 
@@ -866,26 +998,44 @@ const CreateTender = () => {
                       }
                       onChange={handleChange}
                       disabled={loadingOptions}
-                      className={selectClass}
+                      className={`${selectClass} ${
+                    fieldErrors.internalOwnerId
+                      ? 'border-red-400 focus:border-red-500 focus:ring-red-100'
+                      : ''
+                  }`}
                     >
+
+                     
                       <option value="">
                         {loadingOptions
                           ? 'Loading owners...'
                           : 'Select internal owner'}
                       </option>
 
-                      {internalOwners.map(
-                        (owner) => (
-                          <option
-                            key={owner.id}
-                            value={owner.id}
-                          >
-                            {owner.name} —{' '}
-                            {owner.role}
-                          </option>
-                        )
-                      )}
+                      {internalOwners.map((owner) => {
+                      const activeTenderCount =
+                        Number(owner.active_tender_count) || 0
+
+                      return (
+                        <option
+                          key={owner.id}
+                          value={owner.id}
+                        >
+                          {owner.name} — {activeTenderCount}{' '}
+                          active{' '}
+                          {activeTenderCount === 1
+                            ? 'tender'
+                            : 'tenders'}
+                        </option>
+                      )
+                    })}
                     </select>
+
+                    {fieldErrors.internalOwnerId && (
+                      <p className="mt-1.5 text-xs font-medium text-red-600">
+                        {fieldErrors.internalOwnerId}
+                      </p>
+                    )}
 
                     <p className="mt-2 text-xs text-slate-400">
                       Admin, CEO or Manager responsible

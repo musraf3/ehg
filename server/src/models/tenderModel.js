@@ -355,6 +355,25 @@ export const assignTenderToEmployee = async ({
   return result.insertId
 }
 
+
+
+export const getTenderEmployeeById = async (userId) => {
+  const [rows] = await pool.query(
+    `
+    SELECT
+      id,
+      name,
+      email
+    FROM users
+    WHERE id = ?
+    LIMIT 1
+    `,
+    [userId]
+  )
+
+  return rows[0] || null
+}
+
 export const getTenderAssignments = async (tenderId) => {
   const [rows] = await pool.query(
     `

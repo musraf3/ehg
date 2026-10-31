@@ -11,6 +11,9 @@ import {
 } from '../models/tenderDocumentModel.js'
 
 import { getTenderById } from '../models/tenderModel.js'
+
+import { createTenderActivity } from '../models/tenderActivityModel.js'
+
 import pool from '../config/db.js'
 
 const ALLOWED_DOCUMENT_TYPES = [
@@ -93,6 +96,59 @@ const validateComplianceItem = async (
   )
 
   return rows.length > 0
+}
+
+
+
+const getDocumentLinkContext = async ({
+  requirementId,
+  complianceItemId,
+}) => {
+  if (requirementId) {
+    const [rows] = await pool.query(
+      `
+        SELECT id, title
+        FROM tender_requirements
+        WHERE id = ?
+        LIMIT 1
+      `,
+      [requirementId]
+    )
+
+    if (rows.length > 0) {
+      return {
+        linkType: 'REQUIREMENT',
+        linkId: rows[0].id,
+        linkTitle: rows[0].title,
+      }
+    }
+  }
+
+  if (complianceItemId) {
+    const [rows] = await pool.query(
+      `
+        SELECT id, title
+        FROM tender_compliance_items
+        WHERE id = ?
+        LIMIT 1
+      `,
+      [complianceItemId]
+    )
+
+    if (rows.length > 0) {
+      return {
+        linkType: 'COMPLIANCE',
+        linkId: rows[0].id,
+        linkTitle: rows[0].title,
+      }
+    }
+  }
+
+  return {
+    linkType: 'TENDER',
+    linkId: null,
+    linkTitle: null,
+  }
 }
 
 const isRequirementAssignedToEmployee = async (
@@ -418,6 +474,55 @@ if (req.user.role === 'EMPLOYEE') {
       uploadedBy: req.user.id,
     })
 
+    const linkContext = await getDocumentLinkContext({
+  requirementId: parsedRequirementId,
+  complianceItemId: parsedComplianceItemId,
+})
+
+const isEvidence =
+  documentType === 'INTERNAL_SUBMISSION'
+
+const documentLabel = isEvidence
+  ? 'evidence'
+  : 'source document'
+
+let activityDescription =
+  `${isEvidence ? 'Evidence' : 'Source document'} ` +
+  `"${req.file.originalname}" was uploaded.`
+
+if (linkContext.linkType === 'REQUIREMENT') {
+  activityDescription +=
+    ` Linked to requirement "${linkContext.linkTitle}".`
+} else if (linkContext.linkType === 'COMPLIANCE') {
+  activityDescription +=
+    ` Linked to compliance item "${linkContext.linkTitle}".`
+} else {
+  activityDescription += ' Linked to tender.'
+}
+
+await createTenderActivity({
+  tenderId,
+  userId: req.user.id,
+  actionType: 'DOCUMENT_UPLOADED',
+  entityType: 'DOCUMENT',
+  entityId: document.id,
+  description: activityDescription,
+  metadata: {
+    documentId: document.id,
+    documentType,
+    documentLabel,
+    title: document.title,
+    fileName: req.file.originalname,
+
+    linkType: linkContext.linkType,
+    linkId: linkContext.linkId,
+    linkTitle: linkContext.linkTitle,
+
+    requirementId: parsedRequirementId,
+    complianceItemId: parsedComplianceItemId,
+  },
+})
+
     const summary =
       await getTenderDocumentSummary(tenderId)
 
@@ -680,6 +785,19 @@ if (req.user.role === 'EMPLOYEE') {
   }
 }
 
+const previousLinkContext =
+  await getDocumentLinkContext({
+    requirementId: existing.requirement_id || null,
+    complianceItemId:
+      existing.compliance_item_id || null,
+  })
+
+const newLinkContext =
+  await getDocumentLinkContext({
+    requirementId: parsedRequirementId,
+    complianceItemId: parsedComplianceItemId,
+  })
+
     const updatedDocument =
   await updateTenderDocument(
     documentId,
@@ -703,6 +821,80 @@ if (req.user.role === 'EMPLOYEE') {
       fileSize: req.file?.size || null,
     }
   )
+
+
+  const previousDocumentType =
+  existing.document_type
+
+const newDocumentType =
+  updatedDocument.document_type
+
+const previousTitle =
+  existing.title
+
+const newTitle =
+  updatedDocument.title
+
+const previousFileName =
+  existing.file_name
+
+const newFileName =
+  updatedDocument.file_name
+
+const descriptionChanged =
+  (existing.description || '') !==
+  (updatedDocument.description || '')
+
+const linkChanged =
+  previousLinkContext.linkType !==
+    newLinkContext.linkType ||
+  Number(previousLinkContext.linkId || 0) !==
+    Number(newLinkContext.linkId || 0)
+
+const isEvidence =
+  newDocumentType === 'INTERNAL_SUBMISSION'
+
+await createTenderActivity({
+  tenderId,
+  userId: req.user.id,
+  actionType: 'DOCUMENT_UPDATED',
+  entityType: 'DOCUMENT',
+  entityId: documentId,
+  description:
+    `${isEvidence ? 'Evidence' : 'Source document'} ` +
+    `"${newTitle}" was updated.`,
+  metadata: {
+    documentId,
+
+    previousDocumentType,
+    newDocumentType,
+
+    previousTitle,
+    newTitle,
+
+    descriptionChanged,
+
+    previousFileName,
+    newFileName,
+    fileReplaced: Boolean(req.file),
+
+    linkChanged,
+
+    previousLinkType:
+      previousLinkContext.linkType,
+    previousLinkId:
+      previousLinkContext.linkId,
+    previousLinkTitle:
+      previousLinkContext.linkTitle,
+
+    newLinkType:
+      newLinkContext.linkType,
+    newLinkId:
+      newLinkContext.linkId,
+    newLinkTitle:
+      newLinkContext.linkTitle,
+  },
+})
 
     const summary =
       await getTenderDocumentSummary(tenderId)
@@ -1005,6 +1197,15 @@ if (req.user.role === 'EMPLOYEE') {
   }
 }
 
+
+const linkContext =
+  await getDocumentLinkContext({
+    requirementId:
+      document.requirement_id || null,
+    complianceItemId:
+      document.compliance_item_id || null,
+  })
+
 const removed =
   await deactivateTenderDocument(documentId)
 
@@ -1024,6 +1225,53 @@ const removed =
       A future administrator cleanup/archive process can safely
       remove orphaned physical files.
     */
+
+
+      const isEvidence =
+  document.document_type === 'INTERNAL_SUBMISSION'
+
+const documentLabel = isEvidence
+  ? 'evidence'
+  : 'source document'
+
+let activityDescription =
+  `${isEvidence ? 'Evidence' : 'Source document'} ` +
+  `"${document.file_name}" was removed.`
+
+if (linkContext.linkType === 'REQUIREMENT') {
+  activityDescription +=
+    ` Linked to requirement "${linkContext.linkTitle}".`
+} else if (linkContext.linkType === 'COMPLIANCE') {
+  activityDescription +=
+    ` Linked to compliance item "${linkContext.linkTitle}".`
+} else {
+  activityDescription += ' Linked to tender.'
+}
+
+await createTenderActivity({
+  tenderId,
+  userId: req.user.id,
+  actionType: 'DOCUMENT_ARCHIVED',
+  entityType: 'DOCUMENT',
+  entityId: documentId,
+  description: activityDescription,
+  metadata: {
+    documentId,
+    documentType: document.document_type,
+    documentLabel,
+    title: document.title,
+    fileName: document.file_name,
+
+    linkType: linkContext.linkType,
+    linkId: linkContext.linkId,
+    linkTitle: linkContext.linkTitle,
+
+    requirementId:
+      document.requirement_id || null,
+    complianceItemId:
+      document.compliance_item_id || null,
+  },
+})
 
     const summary =
       await getTenderDocumentSummary(tenderId)
