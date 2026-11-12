@@ -311,24 +311,24 @@ const EmployeeDashboard = () => {
       accent:
         'bg-sky-50 text-[#2F8CC9]',
     },
-    {
-      label: 'Compliance Checklist',
-      description:
-        'Available in the workflow phase',
-      icon: ClipboardCheck,
-      route: '/employee/compliance',
-      accent:
-        'bg-amber-50 text-amber-600',
-    },
-    {
-      label: 'My Documents',
-      description:
-        'Document management module',
-      icon: FileText,
-      route: '/employee/documents',
-      accent:
-        'bg-purple-50 text-[#6B3A98]',
-    },
+    // {
+    //   label: 'Compliance Checklist',
+    //   description:
+    //     'Available in the workflow phase',
+    //   icon: ClipboardCheck,
+    //   route: '/employee/compliance',
+    //   accent:
+    //     'bg-amber-50 text-amber-600',
+    // },
+    // {
+    //   label: 'My Documents',
+    //   description:
+    //     'Document management module',
+    //   icon: FileText,
+    //   route: '/employee/documents',
+    //   accent:
+    //     'bg-purple-50 text-[#6B3A98]',
+    // },
   ]
 
   return (

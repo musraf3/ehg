@@ -53,6 +53,10 @@ const TenderManagement = () => {
   const [selectedEmployeeId, setSelectedEmployeeId] =
     useState('')
 
+  const [employeeSearch, setEmployeeSearch] = useState('')
+  const [employeeDropdownOpen, setEmployeeDropdownOpen] = useState(false)
+
+  const [removingEmployeeId, setRemovingEmployeeId] = useState(null)
   const [assigning, setAssigning] = useState(false)
   const [assignmentError, setAssignmentError] =
     useState('')
@@ -65,12 +69,16 @@ const TenderManagement = () => {
   const createTenderPath =
     user?.role === 'ADMIN'
       ? '/admin/tenders/create'
-      : '/manager/tenders/create'
+      : user?.role === 'CEO'
+        ? '/ceo/tenders/create'
+        : '/manager/tenders/create'
 
   const getEditTenderPath = (tenderId) =>
     user?.role === 'ADMIN'
       ? `/admin/tenders/${tenderId}/edit`
-      : `/manager/tenders/${tenderId}/edit`
+      : user?.role === 'CEO'
+        ? `/ceo/tenders/${tenderId}/edit`
+        : `/manager/tenders/${tenderId}/edit`
 
     const fetchTenders = async () => {
     try {
@@ -144,17 +152,21 @@ const TenderManagement = () => {
   }
 
   const closeAssignModal = () => {
-    if (assigning) return
+    if (assigning || removingEmployeeId !== null) return
 
     setShowAssignModal(false)
     setSelectedTender(null)
     setSelectedEmployeeId('')
+    setEmployeeSearch('')
+    setEmployeeDropdownOpen(false)
     setAssignmentError('')
   }
 
   const openAssignModal = async (tender) => {
   setSelectedTender(tender)
   setSelectedEmployeeId('')
+  setEmployeeSearch('')
+  setEmployeeDropdownOpen(false)
   setAssignmentError('')
   setSuccessMessage('')
   setShowAssignModal(true)
@@ -181,6 +193,45 @@ const TenderManagement = () => {
     setEmployeesLoading(false)
   }
 }
+  const handleRemoveEmployee = async (assignment) => {
+    if (!selectedTender || removingEmployeeId !== null || assigning) return
+
+    const userId = Number(assignment.user_id ?? assignment.employee_id)
+    if (!Number.isInteger(userId) || userId <= 0) {
+      setAssignmentError('Unable to identify the assigned employee. Please refresh and try again.')
+      return
+    }
+
+    const confirmed = window.confirm(
+      `Remove ${assignment.employee_name || 'this employee'} from tender ${selectedTender.reference_no}? The employee account will not be deleted.`
+    )
+    if (!confirmed) return
+
+    try {
+      setRemovingEmployeeId(userId)
+      setAssignmentError('')
+      await api.delete(`/tenders/${selectedTender.id}/assign/${userId}`)
+
+      // Refresh both the modal and the management table from the server.
+      const [tenderResponse, listResponse, employeesResponse] = await Promise.all([
+        api.get(`/tenders/${selectedTender.id}`),
+        api.get('/tenders'),
+        api.get('/tenders/assignable-employees'),
+      ])
+      setSelectedTender(tenderResponse.data.data)
+      setTenders(listResponse.data.data || [])
+      setEmployees(employeesResponse.data.employees || [])
+      setSelectedEmployeeId('')
+      setEmployeeSearch('')
+      setEmployeeDropdownOpen(false)
+      setSuccessMessage(`${assignment.employee_name || 'Employee'} removed from ${selectedTender.reference_no}.`)
+    } catch (error) {
+      setAssignmentError(error.response?.data?.message || 'Unable to remove employee. Please try again.')
+    } finally {
+      setRemovingEmployeeId(null)
+    }
+  }
+
   const handleAssignEmployee = async (event) => {
     event.preventDefault()
 
@@ -281,7 +332,7 @@ const TenderManagement = () => {
           </p>
         </div>
 
-        {user?.role !== 'CEO' && (
+        {['ADMIN', 'CEO', 'MANAGER'].includes(user?.role) && (
         <button
           type="button"
           onClick={() =>
@@ -619,7 +670,7 @@ const TenderManagement = () => {
                               Workspace
                             </button>
 
-                            {user?.role !== 'CEO' && (
+                            {['ADMIN', 'CEO', 'MANAGER'].includes(user?.role) && (
                               <>
                                 <button
                                   type="button"
@@ -833,7 +884,7 @@ const TenderManagement = () => {
                         Open Workspace
                       </button>
 
-                      {user?.role !== 'CEO' && (
+                      {['ADMIN', 'CEO', 'MANAGER'].includes(user?.role) && (
                         <div className="grid grid-cols-3 gap-3">
                           <button
                             type="button"
@@ -911,7 +962,7 @@ const TenderManagement = () => {
               <button
                 type="button"
                 onClick={closeAssignModal}
-                disabled={assigning}
+                disabled={assigning || removingEmployeeId !== null}
                 className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 disabled:opacity-50"
                 aria-label="Close"
               >
@@ -954,18 +1005,28 @@ const TenderManagement = () => {
                     </p>
 
                     <div className="mt-2 flex flex-wrap gap-2">
-                      {getAssignedEmployees(
-                        selectedTender
-                      ).map((assignment) => (
-                        <span
-                          key={assignment.id}
-                          className="inline-flex items-center rounded-full border border-purple-100 bg-purple-50 px-2.5 py-1 text-xs font-semibold text-[#6B3A98]"
-                        >
-                          {
-                            assignment.employee_name
-                          }
-                        </span>
-                      ))}
+                      {getAssignedEmployees(selectedTender).map((assignment) => {
+                        const userId = Number(assignment.user_id ?? assignment.employee_id)
+                        const isRemoving = removingEmployeeId === userId
+                        return (
+                          <div
+                            key={assignment.id ?? userId}
+                            className="inline-flex items-center gap-2 rounded-full border border-purple-100 bg-purple-50 py-1 pl-3 pr-1 text-xs font-semibold text-[#6B3A98]"
+                          >
+                            <span>{assignment.employee_name}</span>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveEmployee(assignment)}
+                              disabled={assigning || removingEmployeeId !== null}
+                              aria-label={`Remove ${assignment.employee_name} from tender`}
+                              title="Remove from this tender"
+                              className="inline-flex h-7 w-7 items-center justify-center rounded-full text-red-600 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {isRemoving ? <RefreshCcw size={13} className="animate-spin" /> : <X size={14} />}
+                            </button>
+                          </div>
+                        )
+                      })}
                     </div>
                   </div>
                 )}
@@ -1017,34 +1078,95 @@ const TenderManagement = () => {
                 </div>
               ) : (
                 <>
-                  <select
-                    value={selectedEmployeeId}
-                    onChange={(event) => {
-                      setSelectedEmployeeId(
-                        event.target.value
-                      )
-                      setAssignmentError('')
-                    }}
-                    className="h-12 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm text-slate-900 outline-none transition focus:border-[#6B3A98] focus:ring-2 focus:ring-[#6B3A98]/10"
-                  >
-                    <option value="">
-                      Select employee
-                    </option>
+                  <div className="relative">
+                    <div className="relative">
+                      <Search
+                        size={17}
+                        className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"
+                      />
+                      <input
+                        type="search"
+                        value={employeeSearch}
+                        onFocus={() => setEmployeeDropdownOpen(true)}
+                        onChange={(event) => {
+                          setEmployeeSearch(event.target.value)
+                          setEmployeeDropdownOpen(true)
+                          setSelectedEmployeeId('')
+                          setAssignmentError('')
+                        }}
+                        placeholder="Search employees by name..."
+                        aria-label="Search employees"
+                        aria-expanded={employeeDropdownOpen}
+                        className="h-12 w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-10 pr-10 text-sm text-slate-900 outline-none transition focus:border-[#6B3A98] focus:ring-2 focus:ring-[#6B3A98]/10"
+                      />
+                      <button
+                        type="button"
+                        aria-label={employeeDropdownOpen ? 'Close employee list' : 'Open employee list'}
+                        onClick={() => setEmployeeDropdownOpen((current) => !current)}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg px-2 py-1 text-slate-500 hover:bg-slate-100"
+                      >
+                        {employeeDropdownOpen ? '▲' : '▼'}
+                      </button>
+                    </div>
 
-                    {employees.map(
-                      (employee) => (
-                        <option
-                          key={employee.id}
-                          value={employee.id}
-                        >
-                          {employee.name}
-                          {employee.department
-                            ? ` — ${employee.department}`
-                            : ''}
-                        </option>
-                      )
+                    {employeeDropdownOpen && (
+                      <div className="mt-2 max-h-60 overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-lg">
+                        {employees
+                          .filter((employee) =>
+                            `${employee.name || ''} ${employee.department || ''}`
+                              .toLowerCase()
+                              .includes(employeeSearch.trim().toLowerCase())
+                          )
+                          .map((employee) => {
+                            const alreadyAssigned = (selectedTender?.assignments || []).some(
+                              (assignment) =>
+                                String(assignment.user_id ?? assignment.employee_id) === String(employee.id)
+                            )
+                            const count = Number(employee.active_tender_count)
+                            const countAvailable = employee.active_tender_count != null && Number.isFinite(count)
+
+                            return (
+                              <button
+                                type="button"
+                                key={employee.id}
+                                disabled={alreadyAssigned}
+                                onClick={() => {
+                                  setSelectedEmployeeId(String(employee.id))
+                                  setEmployeeSearch(employee.name || '')
+                                  setEmployeeDropdownOpen(false)
+                                  setAssignmentError('')
+                                }}
+                                className="flex w-full items-center justify-between gap-3 border-b border-slate-100 px-4 py-3 text-left last:border-b-0 hover:bg-purple-50 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:opacity-60"
+                              >
+                                <span className="min-w-0">
+                                  <span className="block truncate text-sm font-semibold text-slate-800">
+                                    {employee.name}
+                                  </span>
+                                  {employee.department && (
+                                    <span className="block truncate text-xs text-slate-500">{employee.department}</span>
+                                  )}
+                                </span>
+                                <span className="shrink-0 text-right">
+                                  <span className="block rounded-full bg-purple-50 px-2 py-1 text-xs font-semibold text-[#6B3A98]">
+                                    {countAvailable ? `${count} active ${count === 1 ? 'tender' : 'tenders'}` : 'Count unavailable'}
+                                  </span>
+                                  {alreadyAssigned && (
+                                    <span className="mt-1 block text-xs font-medium text-slate-500">Already assigned</span>
+                                  )}
+                                </span>
+                              </button>
+                            )
+                          })}
+                        {!employees.some((employee) =>
+                          `${employee.name || ''} ${employee.department || ''}`
+                            .toLowerCase()
+                            .includes(employeeSearch.trim().toLowerCase())
+                        ) && (
+                          <p className="p-4 text-center text-sm text-slate-500">No matching employees found.</p>
+                        )}
+                      </div>
                     )}
-                  </select>
+                  </div>
 
                   {selectedEmployeeId && (
                     <div className="mt-4 rounded-xl border border-purple-100 bg-purple-50/60 p-4">
@@ -1093,7 +1215,7 @@ const TenderManagement = () => {
                 <button
                   type="button"
                   onClick={closeAssignModal}
-                  disabled={assigning}
+                  disabled={assigning || removingEmployeeId !== null}
                   className="min-h-[44px] rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   Cancel
@@ -1104,6 +1226,7 @@ const TenderManagement = () => {
                       type="submit"
                       disabled={
                         assigning ||
+                        removingEmployeeId !== null ||
                         !selectedEmployeeId
                       }
                       className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl bg-[#6B3A98] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#5A3182] disabled:cursor-not-allowed disabled:opacity-50"

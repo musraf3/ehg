@@ -12,7 +12,6 @@ import { getTenderById } from '../models/tenderModel.js'
 
 import pool from '../config/db.js'
 
-import { findUserById } from '../models/userModel.js'
 
 import {
   createTenderActivity,
@@ -170,66 +169,6 @@ export const createRequirement = async (
       })
     }
 
-    let numericAssignedUserId = null
-
-    if (
-      assignedUserId !== undefined &&
-      assignedUserId !== null &&
-      assignedUserId !== ''
-    ) {
-      numericAssignedUserId =
-        normalizeNullableId(assignedUserId)
-
-      if (!numericAssignedUserId) {
-        return res.status(400).json({
-          success: false,
-          message:
-            'Assigned employee ID is invalid.',
-        })
-      }
-
-      const employee = await findUserById(
-        numericAssignedUserId
-      )
-
-      if (!employee) {
-        return res.status(404).json({
-          success: false,
-          message:
-            'Assigned employee does not exist.',
-        })
-      }
-
-      if (employee.role !== 'EMPLOYEE') {
-        return res.status(400).json({
-          success: false,
-          message:
-            'Requirement can only be assigned to an employee.',
-        })
-      }
-
-      if (employee.status !== 'ACTIVE') {
-        return res.status(400).json({
-          success: false,
-          message:
-            'Requirement cannot be assigned to an inactive employee.',
-        })
-      }
-
-      const assignedToTender =
-        await isUserAssignedToTender(
-          tenderId,
-          numericAssignedUserId
-        )
-
-      if (!assignedToTender) {
-        return res.status(400).json({
-          success: false,
-          message:
-            'Employee must be assigned to the tender before assigning this requirement.',
-        })
-      }
-    }
 
     const requirementId =
       await createTenderRequirement({
@@ -241,7 +180,7 @@ export const createRequirement = async (
           normalizeNullableText(description),
         isMandatory: Boolean(isMandatory),
         status,
-        assignedUserId: numericAssignedUserId,
+        assignedUserId: null,
         dueDate: dueDate || null,
         sortOrder: numericSortOrder,
         createdBy: req.user.id,
@@ -380,66 +319,6 @@ export const updateRequirement = async (
       })
     }
 
-    let numericAssignedUserId = null
-
-    if (
-      assignedUserId !== undefined &&
-      assignedUserId !== null &&
-      assignedUserId !== ''
-    ) {
-      numericAssignedUserId =
-        normalizeNullableId(assignedUserId)
-
-      if (!numericAssignedUserId) {
-        return res.status(400).json({
-          success: false,
-          message:
-            'Assigned employee ID is invalid.',
-        })
-      }
-
-      const employee = await findUserById(
-        numericAssignedUserId
-      )
-
-      if (!employee) {
-        return res.status(404).json({
-          success: false,
-          message:
-            'Assigned employee does not exist.',
-        })
-      }
-
-      if (employee.role !== 'EMPLOYEE') {
-        return res.status(400).json({
-          success: false,
-          message:
-            'Requirement can only be assigned to an employee.',
-        })
-      }
-
-      if (employee.status !== 'ACTIVE') {
-        return res.status(400).json({
-          success: false,
-          message:
-            'Requirement cannot be assigned to an inactive employee.',
-        })
-      }
-
-      const assignedToTender =
-        await isUserAssignedToTender(
-          tenderId,
-          numericAssignedUserId
-        )
-
-      if (!assignedToTender) {
-        return res.status(400).json({
-          success: false,
-          message:
-            'Employee must be assigned to the tender before assigning this requirement.',
-        })
-      }
-    }
 
     let completedBy =
       existingRequirement.completed_by
@@ -474,8 +353,7 @@ export const updateRequirement = async (
           normalizeNullableText(description),
         isMandatory: Boolean(isMandatory),
         status,
-        assignedUserId:
-          numericAssignedUserId,
+        assignedUserId: null,
         dueDate: dueDate || null,
         sortOrder: numericSortOrder,
         completedBy,
@@ -595,13 +473,12 @@ export const updateEmployeeRequirementProgress = async (
     // Employee can update only a requirement
     // specifically assigned to them.
     if (
-      Number(requirement.assigned_user_id) !==
-      Number(req.user.id)
+      !(await isUserAssignedToTender(tenderId, req.user.id))
     ) {
       return res.status(403).json({
         success: false,
         message:
-          'You can only update requirements assigned to you.',
+          'You must be assigned to this tender to update requirement progress.',
       })
     }
 
@@ -653,8 +530,7 @@ export const updateEmployeeRequirementProgress = async (
         isMandatory:
           Boolean(requirement.is_mandatory),
         status,
-        assignedUserId:
-          requirement.assigned_user_id,
+        assignedUserId: null,
         dueDate: requirement.due_date || null,
         sortOrder: requirement.sort_order,
         completedBy,

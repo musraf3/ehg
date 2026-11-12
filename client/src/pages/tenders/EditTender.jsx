@@ -11,6 +11,7 @@ import {
   Send,
   UserRound,
   WalletCards,
+  Search, ChevronDown, X,
 } from 'lucide-react'
 import { useNavigate, useParams } from 'react-router-dom'
 
@@ -33,7 +34,7 @@ const initialForm = {
   deadline: '',
   closingTime: '',
   internalDeadline: '',
-  internalOwnerId: '',
+  employeeIds: [],
   submissionMethod: '',
   submissionLocation: '',
 }
@@ -226,7 +227,7 @@ const SummaryRow = ({ label, value }) => (
 const TenderSummary = ({
   form,
   selectedCompany,
-  selectedOwner,
+  selectedEmployees,
   formattedTenderValue,
 }) => {
   const statusLabel =
@@ -317,10 +318,10 @@ const TenderSummary = ({
           />
 
           <SummaryRow
-            label="Internal Owner"
+            label="Assigned Employees"
             value={
-              selectedOwner
-                ? `${selectedOwner.name} (${selectedOwner.role})`
+              selectedEmployees.length
+                ? selectedEmployees.map((employee) => employee.name).join(', ')
                 : 'Not assigned'
             }
           />
@@ -384,8 +385,12 @@ const EditTender = () => {
 
   const [form, setForm] = useState(initialForm)
   const [companies, setCompanies] = useState([])
-  const [internalOwners, setInternalOwners] =
-    useState([])
+  const [employees, setEmployees] = useState([])
+  const [originalEmployeeIds, setOriginalEmployeeIds] = useState([])
+  const [companySearch, setCompanySearch] = useState('')
+  const [companyDropdownOpen, setCompanyDropdownOpen] = useState(false)
+  const [employeeSearch, setEmployeeSearch] = useState('')
+  const [employeeDropdownOpen, setEmployeeDropdownOpen] = useState(false)
 
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] =
@@ -395,7 +400,9 @@ const EditTender = () => {
   const tenderListPath =
     user?.role === 'ADMIN'
       ? '/admin/tenders'
-      : '/manager/tenders'
+      : user?.role === 'CEO'
+        ? '/ceo/tenders'
+        : '/manager/tenders'
 
   useEffect(() => {
     const loadPage = async () => {
@@ -403,40 +410,42 @@ const EditTender = () => {
         setLoading(true)
         setError('')
 
-        const [
-          tenderResponse,
-          companiesResponse,
-          ownersResponse,
-        ] = await Promise.all([
+        const [tenderResponse, companiesResponse] = await Promise.all([
           api.get(`/tenders/${id}`),
           api.get('/companies'),
-          api.get('/tenders/internal-owners'),
         ])
 
         const tender = tenderResponse.data.data
-
         const companiesData =
           companiesResponse.data?.data ||
-          companiesResponse.data?.companies ||
-          []
+          companiesResponse.data?.companies || []
 
-        const ownersData =
-          ownersResponse.data?.owners || []
+        const availableCompanies = Array.isArray(companiesData)
+          ? companiesData.filter(
+              (company) =>
+                company.status === 'ACTIVE' ||
+                String(company.id) === String(tender.company_id)
+            )
+          : []
 
-        setCompanies(
-          Array.isArray(companiesData)
-            ? companiesData.filter(
-                (company) =>
-                  company.status === 'ACTIVE'
-              )
-            : []
-        )
+        setCompanies(availableCompanies)
 
-        setInternalOwners(
-          Array.isArray(ownersData)
-            ? ownersData
-            : []
-        )
+        const employeeResponse = await api.get('/tenders/assignable-employees')
+        const availableEmployees = Array.isArray(employeeResponse.data?.employees)
+          ? employeeResponse.data.employees : []
+        const assignments = Array.isArray(tender.assignments) ? tender.assignments : []
+        const assignedIds = assignments.map((assignment) => Number(assignment.user_id ?? assignment.employee_id))
+          .filter((value) => Number.isInteger(value) && value > 0)
+        // Preserve assigned employees even when no longer in the assignable list.
+        const allEmployees = [...availableEmployees]
+        assignments.forEach((assignment) => {
+          const employeeId = Number(assignment.user_id ?? assignment.employee_id)
+          if (employeeId > 0 && !allEmployees.some((employee) => Number(employee.id) === employeeId)) {
+            allEmployees.push({ id: employeeId, name: assignment.employee_name || `Employee #${employeeId}`, department: assignment.department, unavailable: true })
+          }
+        })
+        setEmployees(allEmployees)
+        setOriginalEmployeeIds(assignedIds)
 
         setForm({
           companyId:
@@ -492,8 +501,7 @@ const EditTender = () => {
               tender.internal_deadline
             ),
 
-          internalOwnerId:
-            tender.internal_owner_id ?? '',
+          employeeIds: assignedIds,
 
           submissionMethod:
             tender.submission_method || '',
@@ -524,15 +532,30 @@ const EditTender = () => {
     [companies, form.companyId]
   )
 
-  const selectedOwner = useMemo(
-    () =>
-      internalOwners.find(
-        (owner) =>
-          String(owner.id) ===
-          String(form.internalOwnerId)
-      ),
-    [internalOwners, form.internalOwnerId]
-  )
+  const filteredCompanies = useMemo(() => companies.filter((company) =>
+    `${company.name || ''} ${company.code || ''}`.toLowerCase().includes(companySearch.trim().toLowerCase())
+  ), [companies, companySearch])
+
+  const selectedEmployees = useMemo(() => employees.filter((employee) =>
+    form.employeeIds.includes(Number(employee.id))
+  ), [employees, form.employeeIds])
+
+  const filteredEmployees = useMemo(() => employees.filter((employee) =>
+    String(employee.name || '').toLowerCase().includes(employeeSearch.trim().toLowerCase())
+  ).sort((a, b) => (a.active_tender_count == null ? Infinity : Number(a.active_tender_count)) -
+    (b.active_tender_count == null ? Infinity : Number(b.active_tender_count))), [employees, employeeSearch])
+
+  const handleCompanySelection = (companyId) => {
+    setForm((current) => ({ ...current, companyId: String(companyId) }))
+    setCompanySearch('')
+    setCompanyDropdownOpen(false)
+  }
+
+  const handleEmployeeSelection = (employeeId) => {
+    setForm((current) => ({ ...current, employeeIds: current.employeeIds.includes(employeeId)
+      ? current.employeeIds.filter((id) => id !== employeeId)
+      : [...current.employeeIds, employeeId] }))
+  }
 
   const formattedTenderValue = useMemo(() => {
     if (
@@ -572,6 +595,15 @@ const EditTender = () => {
     event.preventDefault()
 
     setError('')
+
+    if (!Number.isInteger(Number(form.companyId)) || Number(form.companyId) <= 0) {
+      setError('Please select a valid company.')
+      return
+    }
+    if (!form.employeeIds.length) {
+      setError('Please assign at least one employee.')
+      return
+    }
 
     if (!form.referenceNo.trim()) {
       setError(
@@ -621,13 +653,17 @@ const EditTender = () => {
       return
     }
 
+    const companyId = Number(form.companyId)
+    if (!Number.isInteger(companyId) || companyId <= 0) {
+      setError('Please select a valid company before saving.')
+      return
+    }
+
     try {
       setSubmitting(true)
 
       await api.put(`/tenders/${id}`, {
-        companyId: form.companyId
-          ? Number(form.companyId)
-          : null,
+        companyId,
 
         referenceNo:
           form.referenceNo.trim(),
@@ -673,10 +709,7 @@ const EditTender = () => {
         internalDeadline:
           form.internalDeadline || null,
 
-        internalOwnerId:
-          form.internalOwnerId
-            ? Number(form.internalOwnerId)
-            : null,
+        internalOwnerId: null,
 
         submissionMethod:
           form.submissionMethod.trim(),
@@ -684,6 +717,38 @@ const EditTender = () => {
         submissionLocation:
           form.submissionLocation.trim(),
       })
+
+      // Existing assignment endpoints are separate from the tender update.
+      // Apply additions before removals, so a failed add cannot leave the tender empty.
+      const toAdd = form.employeeIds.filter((employeeId) => !originalEmployeeIds.includes(employeeId))
+      const toRemove = originalEmployeeIds.filter((employeeId) => !form.employeeIds.includes(employeeId))
+      const failures = []
+      for (const employeeId of toAdd) {
+        try {
+          await api.post(`/tenders/${id}/assign`, { userId: employeeId })
+        } catch (assignmentError) {
+          failures.push(`Could not assign employee #${employeeId}: ${assignmentError.response?.data?.message || assignmentError.message}`)
+        }
+      }
+      if (failures.length === 0) {
+        for (const employeeId of toRemove) {
+          try {
+            await api.delete(`/tenders/${id}/assign/${employeeId}`)
+          } catch (assignmentError) {
+            failures.push(`Could not remove employee #${employeeId}: ${assignmentError.response?.data?.message || assignmentError.message}`)
+          }
+        }
+      }
+      if (failures.length) {
+        const refreshed = await api.get(`/tenders/${id}`)
+        const refreshedIds = (refreshed.data?.data?.assignments || [])
+          .map((assignment) => Number(assignment.user_id ?? assignment.employee_id))
+          .filter((employeeId) => Number.isInteger(employeeId) && employeeId > 0)
+        setOriginalEmployeeIds(refreshedIds)
+        setForm((current) => ({ ...current, employeeIds: refreshedIds }))
+        setError(`Tender details were saved, but employee assignments were only partially updated. ${failures.join(' ')}`)
+        return
+      }
 
       navigate(tenderListPath, {
         replace: true,
@@ -800,37 +865,30 @@ const EditTender = () => {
                       Company Responsible
                     </FieldLabel>
 
-                    <div className="relative">
-                      <Building2
-                        size={17}
-                        className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"
-                      />
-
-                      <select
-                        id="companyId"
-                        name="companyId"
-                        value={form.companyId}
-                        onChange={handleChange}
-                        className={`${selectClass} pl-10`}
-                      >
-                        <option value="">
-                          No company selected
-                        </option>
-
-                        {companies.map(
-                          (company) => (
-                            <option
-                              key={company.id}
-                              value={company.id}
-                            >
-                              {company.name}
-                              {company.code
-                                ? ` (${company.code})`
-                                : ''}
-                            </option>
-                          )
-                        )}
-                      </select>
+                    <div className="relative" onBlur={(event) => {
+                      if (!event.currentTarget.contains(event.relatedTarget)) setCompanyDropdownOpen(false)
+                    }}>
+                      <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 focus-within:border-[#6B3A98]">
+                        <Building2 size={17} className="shrink-0 text-slate-400" />
+                        <input id="companyId" autoComplete="off" aria-label="Search companies" aria-expanded={companyDropdownOpen}
+                          value={companyDropdownOpen ? companySearch : (selectedCompany ? `${selectedCompany.name}${selectedCompany.code ? ` (${selectedCompany.code})` : ''}` : '')}
+                          onChange={(event) => { setCompanySearch(event.target.value); setCompanyDropdownOpen(true) }}
+                          onFocus={() => { setCompanySearch(''); setCompanyDropdownOpen(true) }}
+                          placeholder="Search company by name or code..." className="min-w-0 flex-1 bg-transparent py-1.5 text-sm outline-none" />
+                        <button type="button" aria-label="Toggle companies" onClick={() => setCompanyDropdownOpen((open) => !open)}><ChevronDown size={18} /></button>
+                      </div>
+                      {companyDropdownOpen && (
+                        <div className="relative z-30 mt-1 max-h-56 overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-lg">
+                          {filteredCompanies.length ? filteredCompanies.map((company) => (
+                            <button key={company.id} type="button" onMouseDown={(event) => event.preventDefault()}
+                              onClick={() => handleCompanySelection(company.id)}
+                              className="flex w-full items-center justify-between px-4 py-3 text-left text-sm hover:bg-purple-50">
+                              <span>{company.name}{company.code ? ` (${company.code})` : ''}</span>
+                              {String(company.id) === String(form.companyId) && <CheckCircle2 size={16} />}
+                            </button>
+                          )) : <p className="p-4 text-sm text-slate-500">No matching companies</p>}
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -1053,41 +1111,51 @@ const EditTender = () => {
 
               <div className="p-5 sm:p-6">
                 <div className="grid gap-5 md:grid-cols-2">
-                  <div>
-                    <FieldLabel htmlFor="internalOwnerId">
-                      Internal Tender Owner
-                    </FieldLabel>
-
-                    <select
-                      id="internalOwnerId"
-                      name="internalOwnerId"
-                      value={
-                        form.internalOwnerId
-                      }
-                      onChange={handleChange}
-                      className={selectClass}
-                    >
-                      <option value="">
-                        No owner assigned
-                      </option>
-
-                      {internalOwners.map(
-                        (owner) => (
-                          <option
-                            key={owner.id}
-                            value={owner.id}
-                          >
-                            {owner.name} —{' '}
-                            {owner.role}
-                          </option>
-                        )
-                      )}
-                    </select>
-
-                    <p className="mt-2 text-xs text-slate-400">
-                      Admin, CEO or Manager overseeing
-                      this tender.
-                    </p>
+                  <div id="employeeIds" onBlur={(event) => {
+                    if (!event.currentTarget.contains(event.relatedTarget)) setEmployeeDropdownOpen(false)
+                  }}>
+                    <FieldLabel>Assigned Employees</FieldLabel>
+                    <div className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 focus-within:border-[#6B3A98]">
+                      <Search size={17} className="text-slate-400" />
+                      <input value={employeeSearch} onChange={(event) => { setEmployeeSearch(event.target.value); setEmployeeDropdownOpen(true) }}
+                        onFocus={() => setEmployeeDropdownOpen(true)} placeholder="Search employees by name..."
+                        aria-label="Search employees" className="min-w-0 flex-1 py-1.5 text-sm outline-none" />
+                      <button type="button" aria-label="Toggle employees" onClick={() => setEmployeeDropdownOpen((open) => !open)}><ChevronDown size={18} /></button>
+                    </div>
+                    {selectedEmployees.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {selectedEmployees.map((employee) => (
+                          <span key={employee.id} className="inline-flex items-center gap-1 rounded-lg bg-purple-50 px-2 py-1 text-xs font-medium text-[#6B3A98]">
+                            {employee.name}
+                            <button type="button" aria-label={`Remove ${employee.name}`} onClick={() => handleEmployeeSelection(Number(employee.id))}>
+                              <X size={14} />
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {employeeDropdownOpen && (
+                      <div className="relative z-30 mt-1 max-h-64 overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-lg">
+                        {filteredEmployees.length ? filteredEmployees.map((employee) => {
+                          const employeeId = Number(employee.id)
+                          const count = employee.active_tender_count
+                          return (
+                            <label key={employee.id} className="flex cursor-pointer items-center justify-between gap-3 border-b border-slate-100 px-3 py-3 hover:bg-purple-50">
+                              <span className="flex min-w-0 items-center gap-2">
+                                <input type="checkbox" checked={form.employeeIds.includes(employeeId)}
+                                  onChange={() => handleEmployeeSelection(employeeId)} className="accent-[#6B3A98]" />
+                                <span><span className="block text-sm font-semibold">{employee.name}</span>
+                                  {employee.department && <span className="block text-xs text-slate-500">{employee.department}</span>}</span>
+                              </span>
+                              <span className="shrink-0 rounded-full bg-purple-50 px-2 py-1 text-xs text-[#6B3A98]">
+                                {count == null ? 'Count unavailable' : `${count} active`}
+                              </span>
+                            </label>
+                          )
+                        }) : <p className="p-4 text-sm text-slate-500">No matching employees</p>}
+                      </div>
+                    )}
+                    <p className="mt-2 text-xs text-slate-500">{form.employeeIds.length} selected. Changes take effect when you save.</p>
                   </div>
 
                   <div>
@@ -1281,9 +1349,7 @@ const EditTender = () => {
                 selectedCompany={
                   selectedCompany
                 }
-                selectedOwner={
-                  selectedOwner
-                }
+                selectedEmployees={selectedEmployees}
                 formattedTenderValue={
                   formattedTenderValue
                 }
@@ -1325,9 +1391,7 @@ const EditTender = () => {
                 selectedCompany={
                   selectedCompany
                 }
-                selectedOwner={
-                  selectedOwner
-                }
+                selectedEmployees={selectedEmployees}
                 formattedTenderValue={
                   formattedTenderValue
                 }

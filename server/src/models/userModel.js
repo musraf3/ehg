@@ -197,17 +197,24 @@ export const getActiveEmployees = async () => {
       users.email,
       users.phone,
       users.department,
-      users.status
+      users.status,
+      COUNT(DISTINCT active_tenders.id) AS active_tender_count
     FROM users
-    INNER JOIN roles
-      ON users.role_id = roles.id
+    INNER JOIN roles ON users.role_id = roles.id
+    LEFT JOIN assignments a ON a.user_id = users.id
+    LEFT JOIN tenders active_tenders
+      ON active_tenders.id = a.tender_id
+      AND active_tenders.is_active = 1
+      AND active_tenders.status NOT IN ('COMPLETED', 'CANCELLED')
     WHERE roles.name = 'EMPLOYEE'
       AND users.status = 'ACTIVE'
-    ORDER BY users.name ASC
+    GROUP BY users.id, users.name, users.email, users.phone,
+             users.department, users.status
+    ORDER BY active_tender_count ASC, users.name ASC
   `)
-
   return rows
 }
+
 export const getActiveTenderOwners = async (companyId) => {
   const [rows] = await pool.query(
     `

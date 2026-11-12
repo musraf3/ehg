@@ -108,6 +108,11 @@ export const getTenderComplianceItems = async (
         tci.description,
         tci.is_mandatory,
         tci.status,
+        tci.review_status,
+        tci.reviewed_by,
+      reviewer.name AS reviewed_by_name,
+        tci.reviewed_at,
+        tci.review_comment,
         tci.assigned_user_id,
         assigned_user.name
           AS assigned_user_name,
@@ -128,7 +133,9 @@ export const getTenderComplianceItems = async (
         tci.updated_at
       FROM tender_compliance_items tci
 
-      LEFT JOIN users assigned_user
+      LEFT JOIN users reviewer ON reviewer.id = tci.reviewed_by
+
+    LEFT JOIN users assigned_user
         ON assigned_user.id =
           tci.assigned_user_id
 
@@ -168,6 +175,11 @@ export const getTenderComplianceItemById = async (
         tci.description,
         tci.is_mandatory,
         tci.status,
+        tci.review_status,
+        tci.reviewed_by,
+      reviewer.name AS reviewed_by_name,
+        tci.reviewed_at,
+        tci.review_comment,
         tci.assigned_user_id,
         assigned_user.name
           AS assigned_user_name,
@@ -186,7 +198,9 @@ export const getTenderComplianceItemById = async (
         tci.updated_at
       FROM tender_compliance_items tci
 
-      LEFT JOIN users assigned_user
+      LEFT JOIN users reviewer ON reviewer.id = tci.reviewed_by
+
+    LEFT JOIN users assigned_user
         ON assigned_user.id =
           tci.assigned_user_id
 
@@ -614,7 +628,8 @@ export const updateTenderComplianceItemById =
           notes = ?,
           sort_order = ?,
           completed_by = ?,
-          completed_at = ?
+          completed_at = ?,
+          review_status = CASE WHEN ? = 'COMPLETED' THEN 'AWAITING_REVIEW' ELSE 'NOT_SUBMITTED' END
         WHERE id = ?
           AND tender_id = ?
           AND is_active = 1
@@ -631,6 +646,7 @@ export const updateTenderComplianceItemById =
         sortOrder,
         completedBy,
         completedAt,
+        status,
         complianceItemId,
         tenderId,
       ]

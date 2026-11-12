@@ -21,7 +21,7 @@ const menuByRole = {
   ADMIN: [
     { label: 'Dashboard', icon: LayoutDashboard, path: '/admin/dashboard' },
     { label: 'Tender Management', icon: BriefcaseBusiness, path: '/admin/tenders' },
-         { label: 'Users', icon: Users, path: '/admin/users' },
+         { label: 'Employees', icon: Users, path: '/admin/users' },
      {label: 'Companies',icon: BriefcaseBusiness, path: '/admin/companies',},
     // { label: 'Compliance', icon: ClipboardCheck, path: '/admin/compliance' },
     // { label: 'Document Library', icon: FolderOpen, path: '/admin/documents' },
@@ -31,7 +31,7 @@ const menuByRole = {
     { label: 'Leave Management', icon: CalendarDays, path: '/admin/leave' },
     
     { label: 'Notifications', icon: Bell, path: '/admin/notifications' },
-    { label: 'Settings', icon: Settings, path: '/admin/settings' },
+    // { label: 'Settings', icon: Settings, path: '/admin/settings' },
     
   ],
 
@@ -39,18 +39,18 @@ const menuByRole = {
   { label: 'Dashboard', icon: LayoutDashboard, path: '/ceo/dashboard' },
   { label: 'Tender Management', icon: BriefcaseBusiness, path: '/ceo/tenders' },
   { label: 'Companies', icon: BriefcaseBusiness, path: '/ceo/companies' },
-  { label: 'Users', icon: Users, path: '/ceo/users' },
+  { label: 'Employees', icon: Users, path: '/ceo/users' },
   { label: 'Invoices', icon: ReceiptText, path: '/ceo/invoices' },
   { label: 'Reports & Analytics', icon: ChartNoAxesCombined, path: '/ceo/reports' },
   { label: 'Attendance', icon: Clock3, path: '/ceo/attendance' },
   { label: 'Notifications', icon: Bell, path: '/ceo/notifications' },
-  { label: 'Settings', icon: Settings, path: '/ceo/settings' },
+  // { label: 'Settings', icon: Settings, path: '/ceo/settings' },
 ],
 
   MANAGER: [
     { label: 'Dashboard', icon: LayoutDashboard, path: '/manager/dashboard' },
     { label: 'Tender Management', icon: BriefcaseBusiness, path: '/manager/tenders' },
-    { label: 'Team / Assigned Tenders', icon: FileText, path: '/manager/team-tenders' },
+    // { label: 'Team / Assigned Tenders', icon: FileText, path: '/manager/team-tenders' },
     // { label: 'Compliance Review', icon: ClipboardCheck, path: '/manager/compliance' },
     // { label: 'Document Library', icon: FolderOpen, path: '/manager/documents' },
     { label: 'Invoices', icon: ReceiptText, path: '/manager/invoices' },
@@ -58,7 +58,7 @@ const menuByRole = {
     { label: 'Attendance', icon: Clock3, path: '/manager/attendance' },
     { label: 'Leave', icon: CalendarDays, path: '/manager/leave' },
     { label: 'Notifications', icon: Bell, path: '/manager/notifications' },
-    { label: 'Settings', icon: Settings, path: '/manager/settings' },
+    // { label: 'Settings', icon: Settings, path: '/manager/settings' },
   ],
 
   EMPLOYEE: [
@@ -70,7 +70,7 @@ const menuByRole = {
     { label: 'Attendance', icon: Clock3, path: '/employee/attendance' },
     { label: 'Leave', icon: CalendarDays, path: '/employee/leave' },
     { label: 'Notifications', icon: Bell, path: '/employee/notifications' },
-    { label: 'Settings', icon: Settings, path: '/employee/settings' },
+    // { label: 'Settings', icon: Settings, path: '/employee/settings' },
   ],
 }
 

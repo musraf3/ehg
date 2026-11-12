@@ -7,7 +7,7 @@ import {
 import {
   getAllTenders,
   getTenderById,
-  createTender,
+  createTenderWithAssignments,
   updateTenderById,
   assignTenderToEmployee,
   getTenderAssignments,
@@ -172,6 +172,7 @@ export const createNewTender = async (
       submissionMethod,
       submissionLocation,
       internalOwnerId,
+      employeeIds,
       submittedAt,
     } = req.body
 
@@ -402,7 +403,27 @@ export const createNewTender = async (
        Create Tender
     ----------------------------- */
 
-    const tenderId = await createTender({
+    // Initial assignments are mandatory on the Create Tender page.
+    if (!Array.isArray(employeeIds) || employeeIds.length === 0 ||
+        employeeIds.some((id) => !Number.isSafeInteger(id) || id <= 0) ||
+        new Set(employeeIds).size !== employeeIds.length) {
+      return res.status(400).json({
+        success: false,
+        message: 'Select one or more unique, valid employee IDs.',
+      })
+    }
+
+    // Validate every employee before writing any tender or assignment.
+    const eligibleEmployees = await getActiveEmployees()
+    const eligibleIds = new Set(eligibleEmployees.map((employee) => Number(employee.id)))
+    if (employeeIds.some((id) => !eligibleIds.has(id))) {
+      return res.status(400).json({
+        success: false,
+        message: 'One or more selected employees are not active employees.',
+      })
+    }
+
+    const tenderId = await createTenderWithAssignments({
       companyId: numericCompanyId,
       referenceNo: String(
         referenceNo
@@ -436,7 +457,7 @@ export const createNewTender = async (
         numericInternalOwnerId,
       submittedAt: submittedAt || null,
       createdBy: req.user.id,
-    })
+    }, employeeIds, req.user.id)
 
     const tender =
       await getTenderById(tenderId)

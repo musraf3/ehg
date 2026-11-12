@@ -852,7 +852,8 @@ const handleToggleUserStatus = async () => {
                       >
                         {user.status === 'ACTIVE' ? 'Deactivate' : 'Activate'}
                       </button>
-                          {['CEO', 'MANAGER'].includes(user.role) && (
+
+                          {/* {['CEO', 'MANAGER'].includes(user.role) && (
                           <button
                             type="button"
                             onClick={() => openCompanyModal(user)}
@@ -861,7 +862,7 @@ const handleToggleUserStatus = async () => {
                             <Settings2 size={15} />
                             Manage Companies
                           </button>
-                        )}
+                        )} */}
                        </>
                         )}
 

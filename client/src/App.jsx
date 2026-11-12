@@ -113,6 +113,8 @@ function App() {
     path="/ceo/tenders"
     element={<TenderManagement />}
   />
+  <Route path="/ceo/tenders/create" element={<CreateTender />} />
+  <Route path="/ceo/tenders/:id/edit" element={<EditTender />} />
   <Route
     path="/ceo/tenders/:id/workspace"
     element={<TenderWorkspace />}

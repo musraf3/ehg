@@ -15,6 +15,7 @@
     MessageSquareText,
     Send,
     ShieldCheck,
+    Search,
     Users,
     CircleAlert,
   CircleCheckBig,
@@ -248,7 +249,7 @@
     description: '',
     isMandatory: true,
     status: 'NOT_STARTED',
-    assignedUserId: '',
+
     dueDate: '',
     sortOrder: 0,
   })
@@ -324,7 +325,7 @@ const [
     description: '',
     isMandatory: true,
     status: 'NOT_STARTED',
-    assignedUserId: '',
+
     dueDate: '',
     notes: '',
     sortOrder: 0,
@@ -342,6 +343,8 @@ const [
 
   const [selectedTeamEmployeeId, setSelectedTeamEmployeeId] =
     useState('')
+  const [teamEmployeeSearch, setTeamEmployeeSearch] = useState('')
+  const [teamEmployeeDropdownOpen, setTeamEmployeeDropdownOpen] = useState(false)
 
 
   const [assigningTeamEmployee, setAssigningTeamEmployee] =
@@ -409,6 +412,79 @@ const [editingInternalNote, setEditingInternalNote] =
 
 
 
+  // Phase 3: individual requirement/compliance review dashboard.
+  const [reviewData, setReviewData] = useState(null)
+  const [reviewLoading, setReviewLoading] = useState(false)
+  const [reviewError, setReviewError] = useState('')
+  const [reviewAction, setReviewAction] = useState('')
+  const [reviewChangesTarget, setReviewChangesTarget] = useState(null)
+  const [reviewComment, setReviewComment] = useState('')
+  const canReviewTender = ['ADMIN', 'CEO', 'MANAGER'].includes(user?.role)
+
+  const loadReviewData = async () => {
+    try {
+      setReviewLoading(true)
+      setReviewError('')
+      const response = await api.get(`/tenders/${id}/review`)
+      setReviewData(response.data)
+    } catch (requestError) {
+      setReviewError(requestError.response?.data?.message || 'Unable to load review queue.')
+    } finally {
+      setReviewLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (activeTab === 'review') loadReviewData()
+  }, [activeTab, id])
+
+  const decideReviewItem = async (kind, item, decision, comment = '') => {
+    const key = `${kind}-${item.id}`
+    try {
+      setReviewAction(key)
+      setReviewError('')
+      const segment = kind === 'requirement' ? 'requirements' : 'compliance'
+      await api.patch(`/tenders/${id}/review/${segment}/${item.id}`, { decision, comment })
+      setReviewChangesTarget(null)
+      setReviewComment('')
+      await loadReviewData()
+    } catch (requestError) {
+      setReviewError(requestError.response?.data?.message || 'Unable to save review decision.')
+    } finally {
+      setReviewAction('')
+    }
+  }
+
+  const [submissionData, setSubmissionData] = useState(null)
+  const [submissionLoading, setSubmissionLoading] = useState(false)
+  const [submissionError, setSubmissionError] = useState('')
+  const [submittingTender, setSubmittingTender] = useState(false)
+  const [submissionForm, setSubmissionForm] = useState({ submissionMethod: '', submissionLocation: '', submissionReference: '', submissionNotes: '' })
+  const canSubmitTender = ['ADMIN', 'CEO'].includes(user?.role)
+  const loadSubmission = async () => {
+    try {
+      setSubmissionLoading(true); setSubmissionError('')
+      const { data } = await api.get(`/tenders/${id}/submission`)
+      setSubmissionData(data)
+      setSubmissionForm({ submissionMethod: data.tender?.submission_method || '', submissionLocation: data.tender?.submission_location || '', submissionReference: data.tender?.submission_reference || '', submissionNotes: data.tender?.submission_notes || '' })
+    } catch (e) { setSubmissionError(e.response?.data?.message || 'Unable to load submission readiness') }
+    finally { setSubmissionLoading(false) }
+  }
+  useEffect(() => { if (activeTab === 'submission') loadSubmission() }, [activeTab, id])
+  const handleFinalSubmission = async (event) => {
+    event.preventDefault()
+    if (!canSubmitTender || !submissionData?.readiness?.ready || submissionData?.tender?.status === 'SUBMITTED') return
+    if (!window.confirm('Confirm that this tender has been submitted to the issuing authority?')) return
+    try {
+      setSubmittingTender(true); setSubmissionError('')
+      await api.patch(`/tenders/${id}/submission`, submissionForm)
+      await loadSubmission()
+      const response = await api.get(`/tenders/${id}`)
+      setTender(response.data.data)
+    } catch (e) { setSubmissionError(e.response?.data?.message || 'Submission failed'); await loadSubmission() }
+    finally { setSubmittingTender(false) }
+  }
+
   const [activities, setActivities] = useState([])
 const [activitiesLoading, setActivitiesLoading] =
   useState(false)
@@ -440,51 +516,16 @@ const recentActivities = activities
 
 
   const myResponsibilities = useMemo(() => {
-  if (user?.role !== 'EMPLOYEE') {
+    const all = [...requirements, ...complianceItems]
+    const completed = all.filter((item) => item.status === 'COMPLETED').length
     return {
-      requirements: [],
-      compliance: [],
-      total: 0,
-      completed: 0,
-      outstanding: 0,
+      requirements,
+      compliance: complianceItems,
+      total: all.length,
+      completed,
+      outstanding: all.length - completed,
     }
-  }
-
-  const myRequirements = requirements.filter(
-    (requirement) =>
-      Number(requirement.assigned_user_id) ===
-      Number(user.id)
-  )
-
-  const myCompliance = complianceItems.filter(
-    (item) =>
-      Number(item.assigned_user_id) ===
-      Number(user.id)
-  )
-
-  const allResponsibilities = [
-    ...myRequirements,
-    ...myCompliance,
-  ]
-
-  const completed = allResponsibilities.filter(
-    (item) => item.status === 'COMPLETED'
-  ).length
-
-  return {
-    requirements: myRequirements,
-    compliance: myCompliance,
-    total: allResponsibilities.length,
-    completed,
-    outstanding:
-      allResponsibilities.length - completed,
-  }
-}, [
-  requirements,
-  complianceItems,
-  user?.id,
-  user?.role,
-])
+  }, [requirements, complianceItems])
 
 
 const getRequirementDocuments = (requirementId) => {
@@ -505,38 +546,13 @@ const getComplianceDocuments = (complianceItemId) => {
 
 
 const isEmployeeDocumentResponsibility = (document) => {
-  if (user?.role !== 'EMPLOYEE') {
-    return false
-  }
-
-  if (
-    document.document_type !== 'INTERNAL_SUBMISSION' ||
-    Number(document.uploaded_by) !== Number(user.id)
-  ) {
-    return false
-  }
-
-  if (document.requirement_id) {
-    return requirements.some(
-      (requirement) =>
-        Number(requirement.id) ===
-          Number(document.requirement_id) &&
-        Number(requirement.assigned_user_id) ===
-          Number(user.id)
-    )
-  }
-
-  if (document.compliance_item_id) {
-    return complianceItems.some(
-      (item) =>
-        Number(item.id) ===
-          Number(document.compliance_item_id) &&
-        Number(item.assigned_user_id) ===
-          Number(user.id)
-    )
-  }
-
-  return false
+  return user?.role === 'EMPLOYEE' &&
+    (tender?.assignments || []).some((assignment) =>
+      Number(assignment.user_id ?? assignment.employee_id) === Number(user?.id)
+    ) &&
+    document.document_type === 'INTERNAL_SUBMISSION' &&
+    Number(document.uploaded_by) === Number(user?.id) &&
+    (document.requirement_id || document.compliance_item_id)
 }
 
   const refreshDocuments = async () => {
@@ -832,7 +848,7 @@ const closeDocumentPreview = () => {
       description: '',
       isMandatory: true,
       status: 'NOT_STARTED',
-      assignedUserId: '',
+
       dueDate: '',
       sortOrder: requirements.length,
     })
@@ -851,8 +867,6 @@ const closeDocumentPreview = () => {
       isMandatory:
         Number(requirement.is_mandatory) === 1,
       status: requirement.status || 'NOT_STARTED',
-      assignedUserId:
-        requirement.assigned_user_id || '',
       dueDate: requirement.due_date
         ? String(requirement.due_date).slice(0, 10)
         : '',
@@ -933,9 +947,6 @@ const closeDocumentPreview = () => {
           requirementForm.description.trim() || null,
         isMandatory: requirementForm.isMandatory,
         status: requirementForm.status,
-        assignedUserId: requirementForm.assignedUserId
-          ? Number(requirementForm.assignedUserId)
-          : null,
         dueDate: requirementForm.dueDate || null,
         sortOrder: Number(requirementForm.sortOrder) || 0,
       }
@@ -1192,9 +1203,8 @@ useEffect(() => {
   useEffect(() => {
     if (activeTab !== 'team') return
 
-    // CEO and Employee can view the team,
-    // but only Admin/Manager need the assignable employee list.
-    if (!['ADMIN', 'MANAGER'].includes(user?.role)) {
+    // Management roles can add or remove tender team members.
+    if (!['ADMIN', 'CEO', 'MANAGER'].includes(user?.role)) {
       return
     }
 
@@ -1357,7 +1367,7 @@ const openComplianceTemplateModal = async () => {
       description: '',
       isMandatory: true,
       status: 'NOT_STARTED',
-      assignedUserId: '',
+
       dueDate: '',
       notes: '',
       sortOrder: complianceItems.length,
@@ -1376,7 +1386,7 @@ const openComplianceTemplateModal = async () => {
       description: item.description || '',
       isMandatory: Number(item.is_mandatory) === 1,
       status: item.status || 'NOT_STARTED',
-      assignedUserId: item.assigned_user_id || '',
+
       dueDate: item.due_date
         ? String(item.due_date).slice(0, 10)
         : '',
@@ -1420,9 +1430,6 @@ const openComplianceTemplateModal = async () => {
           complianceForm.description.trim() || null,
         isMandatory: complianceForm.isMandatory,
         status: complianceForm.status,
-        assignedUserId: complianceForm.assignedUserId
-          ? Number(complianceForm.assignedUserId)
-          : null,
         dueDate: complianceForm.dueDate || null,
         notes: complianceForm.notes.trim() || null,
         sortOrder:
@@ -1619,6 +1626,10 @@ const openComplianceTemplateModal = async () => {
       }))
 
       setSelectedTeamEmployeeId('')
+      setTeamEmployeeSearch('')
+      setTeamEmployeeDropdownOpen(false)
+      const refreshedTender = await api.get(`/tenders/${id}`)
+      setTender(refreshedTender.data.data)
     } catch (assignError) {
       setTeamError(
         assignError.response?.data?.message ||
@@ -1645,13 +1656,8 @@ const openComplianceTemplateModal = async () => {
       `/tenders/${id}/assign/${assignment.user_id}`
     )
 
-    setTender((current) => ({
-      ...current,
-      assignments:
-        response.data.assignments ||
-        response.data.data?.assignments ||
-        current.assignments,
-    }))
+    const refreshedTender = await api.get(`/tenders/${id}`)
+    setTender(refreshedTender.data.data)
   } catch (removeError) {
     setTeamError(
       removeError.response?.data?.message ||
@@ -1855,6 +1861,10 @@ const handleInternalNoteDelete = async (note) => {
     const assignments =
       tender.assignments || []
 
+    const isTenderTeamEmployee = user?.role === 'EMPLOYEE' && assignments.some(
+      (assignment) => Number(assignment.user_id ?? assignment.employee_id) === Number(user?.id)
+    )
+
     const activeTabItem = tabs.find(
       (tab) => tab.id === activeTab
     )
@@ -2004,15 +2014,15 @@ const handleInternalNoteDelete = async (note) => {
   <section className="overflow-hidden rounded-2xl border border-purple-200 bg-white shadow-sm">
     <div className="border-b border-purple-100 bg-purple-50/60 px-5 py-4 sm:px-6">
       <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#6B3A98]">
-        My Responsibilities
+        Tender Team Responsibilities
       </p>
 
       <h2 className="mt-1 text-lg font-bold text-slate-950">
-        Your assigned work for this tender
+        Shared work for this tender team
       </h2>
 
       <p className="mt-1 text-sm text-slate-500">
-        Requirements and compliance items assigned directly to you.
+        All tender team members can contribute to these requirements and compliance items.
       </p>
     </div>
 
@@ -2729,7 +2739,7 @@ const handleInternalNoteDelete = async (note) => {
           </p>
         </div>
 
-        {['ADMIN', 'MANAGER'].includes(user?.role) && (
+        {['ADMIN', 'CEO', 'MANAGER'].includes(user?.role) && (
           <button
             type="button"
             onClick={openCreateRequirement}
@@ -2853,12 +2863,6 @@ const handleInternalNoteDelete = async (note) => {
                 {requirements.length === 1 ? '' : 's'}
               </p>
             </div>
-
-            {user?.role === 'CEO' && (
-              <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
-                View Only
-              </span>
-            )}
           </div>
         </div>
 
@@ -2886,7 +2890,7 @@ const handleInternalNoteDelete = async (note) => {
               tender documents.
             </p>
 
-            {['ADMIN', 'MANAGER'].includes(user?.role) && (
+            {['ADMIN', 'CEO', 'MANAGER'].includes(user?.role) && (
               <button
                 type="button"
                 onClick={openCreateRequirement}
@@ -2947,9 +2951,9 @@ const handleInternalNoteDelete = async (note) => {
                         </span>
                       )}
                       {user?.role === 'EMPLOYEE' &&
-                      Number(requirement.assigned_user_id) === Number(user.id) && (
+                      isTenderTeamEmployee && (
                         <span className="inline-flex items-center rounded-full bg-purple-100 px-2.5 py-1 text-xs font-bold text-[#6B3A98]">
-                          My Responsibility
+                          Tender Team
                         </span>
                       )}              
                       
@@ -2957,7 +2961,7 @@ const handleInternalNoteDelete = async (note) => {
                      
 
                     {user?.role === 'EMPLOYEE' &&
-                    Number(requirement.assigned_user_id) === Number(user.id) && (
+                    isTenderTeamEmployee && (
                       <div className="mt-3 flex flex-wrap gap-2">
                         {[
                           ['NOT_STARTED', 'Not Started'],
@@ -2995,6 +2999,38 @@ const handleInternalNoteDelete = async (note) => {
                         {requirement.description}
                       </p>
                     )}
+
+                    {requirement.review_status === 'CHANGES_REQUESTED' && (
+                      <div role="alert" className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="flex items-center gap-2 text-sm font-bold text-red-800">
+                            <CircleAlert size={17} /> Changes Requested by Reviewer
+                          </p>
+                          <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-red-700">Action required</span>
+                        </div>
+                        <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-red-900">
+                          {requirement.review_comment || 'Please contact the reviewer for details of the requested changes.'}
+                        </p>
+                        <p className="mt-2 text-xs text-red-700">
+                          {requirement.reviewed_by_name ? `Reviewed by ${requirement.reviewed_by_name}` : 'Reviewer'}
+                          {requirement.reviewed_at ? ` · ${formatDateTime(requirement.reviewed_at)}` : ''}
+                        </p>
+                        <p className="mt-3 text-xs font-medium text-red-800">
+                          Update the linked evidence below, then select Completed to send this item back for approval.
+                        </p>
+                      </div>
+                    )}
+                    {requirement.review_status === 'AWAITING_REVIEW' && (
+                      <p className="mt-3 rounded-lg bg-amber-50 p-3 text-xs font-semibold text-amber-800">
+                        Awaiting Review — your completed work has been sent to management for approval.
+                      </p>
+                    )}
+                    {requirement.review_status === 'APPROVED' && (
+                      <p className="mt-3 rounded-lg bg-emerald-50 p-3 text-xs font-semibold text-emerald-800">
+                        Approved — no further action is required unless the evidence changes.
+                      </p>
+                    )}
+
 
                     <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                       <div className="rounded-xl bg-slate-50 p-3">
@@ -3052,7 +3088,7 @@ const handleInternalNoteDelete = async (note) => {
                     )}
                   </div>
 
-                 {['ADMIN', 'MANAGER'].includes(user?.role) && (
+                 {['ADMIN', 'CEO', 'MANAGER'].includes(user?.role) && (
                     <div className="flex shrink-0 gap-2">
                       <button
                       type="button"
@@ -3080,7 +3116,7 @@ const handleInternalNoteDelete = async (note) => {
 
                 {/* Requirement Document Actions */}
 <div className="mt-5 flex flex-wrap gap-2 border-t border-slate-100 pt-4">
-  {['ADMIN', 'MANAGER'].includes(user?.role) && (
+  {['ADMIN', 'CEO', 'MANAGER'].includes(user?.role) && (
     <button
       type="button"
       onClick={() =>
@@ -3097,8 +3133,7 @@ const handleInternalNoteDelete = async (note) => {
   )}
 
   {user?.role === 'EMPLOYEE' &&
-    Number(requirement.assigned_user_id) ===
-      Number(user.id) && (
+    isTenderTeamEmployee && (
       <button
         type="button"
         onClick={() =>
@@ -3183,7 +3218,7 @@ const handleInternalNoteDelete = async (note) => {
                   : 'Download'}
               </button>
 
-              {['ADMIN', 'MANAGER'].includes(user?.role) && (
+              {['ADMIN', 'CEO', 'MANAGER'].includes(user?.role) && (
   <>
     <button
       type="button"
@@ -3279,7 +3314,7 @@ const handleInternalNoteDelete = async (note) => {
               </button>
 
 
-              {['ADMIN', 'MANAGER'].includes(user?.role) && (
+              {['ADMIN', 'CEO', 'MANAGER'].includes(user?.role) && (
   <>
     <button
       type="button"
@@ -3302,8 +3337,7 @@ const handleInternalNoteDelete = async (note) => {
 )}
 
              {user?.role === 'EMPLOYEE' &&
-        Number(requirement.assigned_user_id) ===
-        Number(user.id) &&
+        isTenderTeamEmployee &&
         Number(document.uploaded_by) ===
     Number(user.id) && (
     <>
@@ -3367,7 +3401,7 @@ const handleInternalNoteDelete = async (note) => {
           </p>
         </div>
 
-     {['ADMIN', 'MANAGER'].includes(user?.role) && (
+     {['ADMIN', 'CEO', 'MANAGER'].includes(user?.role) && (
     <div className="flex flex-col gap-2 sm:flex-row">
       <button
         type="button"
@@ -3504,12 +3538,6 @@ const handleInternalNoteDelete = async (note) => {
                 {complianceItems.length === 1 ? 'item' : 'items'}
               </p>
             </div>
-
-            {user?.role === 'CEO' && (
-              <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
-                View Only
-              </span>
-            )}
           </div>
         </div>
 
@@ -3536,7 +3564,7 @@ const handleInternalNoteDelete = async (note) => {
               the common tender compliance requirements.
             </p>
 
-            {['ADMIN', 'MANAGER'].includes(user?.role) && (
+            {['ADMIN', 'CEO', 'MANAGER'].includes(user?.role) && (
               <button
                 type="button"
                 onClick={openComplianceTemplateModal}
@@ -3605,9 +3633,9 @@ const handleInternalNoteDelete = async (note) => {
                       )}
 
                       {user?.role === 'EMPLOYEE' &&
-                    Number(item.assigned_user_id) === Number(user.id) && (
+                    isTenderTeamEmployee && (
                       <span className="inline-flex items-center rounded-full bg-purple-100 px-2.5 py-1 text-xs font-bold text-[#6B3A98]">
-                        My Responsibility
+                        Tender Team
                       </span>
                     )}
                     </div>
@@ -3615,7 +3643,7 @@ const handleInternalNoteDelete = async (note) => {
 
 
                     {user?.role === 'EMPLOYEE' &&
-  Number(item.assigned_user_id) === Number(user.id) && (
+  isTenderTeamEmployee && (
     <div className="mt-3 flex flex-wrap gap-2">
       {[
         ['NOT_STARTED', 'Not Started'],
@@ -3654,6 +3682,38 @@ const handleInternalNoteDelete = async (note) => {
                       </p>
                     )}
 
+                    {item.review_status === 'CHANGES_REQUESTED' && (
+                      <div role="alert" className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="flex items-center gap-2 text-sm font-bold text-red-800">
+                            <CircleAlert size={17} /> Changes Requested by Reviewer
+                          </p>
+                          <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-red-700">Action required</span>
+                        </div>
+                        <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-red-900">
+                          {item.review_comment || 'Please contact the reviewer for details of the requested changes.'}
+                        </p>
+                        <p className="mt-2 text-xs text-red-700">
+                          {item.reviewed_by_name ? `Reviewed by ${item.reviewed_by_name}` : 'Reviewer'}
+                          {item.reviewed_at ? ` · ${formatDateTime(item.reviewed_at)}` : ''}
+                        </p>
+                        <p className="mt-3 text-xs font-medium text-red-800">
+                          Update the linked evidence below, then select Completed to send this item back for approval.
+                        </p>
+                      </div>
+                    )}
+                    {item.review_status === 'AWAITING_REVIEW' && (
+                      <p className="mt-3 rounded-lg bg-amber-50 p-3 text-xs font-semibold text-amber-800">
+                        Awaiting Review — your completed work has been sent to management for approval.
+                      </p>
+                    )}
+                    {item.review_status === 'APPROVED' && (
+                      <p className="mt-3 rounded-lg bg-emerald-50 p-3 text-xs font-semibold text-emerald-800">
+                        Approved — no further action is required unless the evidence changes.
+                      </p>
+                    )}
+
+
                     <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                       <div className="rounded-xl bg-slate-50 p-3">
                         <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
@@ -3691,7 +3751,7 @@ const handleInternalNoteDelete = async (note) => {
 
                     {/* Compliance Document Actions */}
 <div className="mt-5 flex flex-wrap gap-2 border-t border-slate-100 pt-4">
-  {['ADMIN', 'MANAGER'].includes(user?.role) && (
+  {['ADMIN', 'CEO', 'MANAGER'].includes(user?.role) && (
     <button
       type="button"
       onClick={() =>
@@ -3708,8 +3768,7 @@ const handleInternalNoteDelete = async (note) => {
   )}
 
   {user?.role === 'EMPLOYEE' &&
-    Number(item.assigned_user_id) ===
-      Number(user.id) && (
+    isTenderTeamEmployee && (
       <button
         type="button"
         onClick={() =>
@@ -3788,7 +3847,7 @@ const handleInternalNoteDelete = async (note) => {
                 Download
               </button>
 
-              {['ADMIN', 'MANAGER'].includes(user?.role) && (
+              {['ADMIN', 'CEO', 'MANAGER'].includes(user?.role) && (
                 <>
                   <button
                     type="button"
@@ -3875,7 +3934,7 @@ const handleInternalNoteDelete = async (note) => {
                 Download
               </button>
 
-              {['ADMIN', 'MANAGER'].includes(user?.role) && (
+              {['ADMIN', 'CEO', 'MANAGER'].includes(user?.role) && (
   <>
     <button
       type="button"
@@ -3898,8 +3957,7 @@ const handleInternalNoteDelete = async (note) => {
 )}
 
 {user?.role === 'EMPLOYEE' &&
-  Number(item.assigned_user_id) ===
-    Number(user.id) &&
+  isTenderTeamEmployee &&
   Number(document.uploaded_by) ===
     Number(user.id) && (
     <>
@@ -3930,7 +3988,7 @@ const handleInternalNoteDelete = async (note) => {
   </div>
 </div>
 
-                    {/* {['ADMIN', 'MANAGER'].includes(user?.role) && (
+                    {/* {['ADMIN', 'CEO', 'MANAGER'].includes(user?.role) && (
     <div className="mt-4 flex flex-wrap gap-2">
       <button
         type="button"
@@ -4021,7 +4079,7 @@ const handleInternalNoteDelete = async (note) => {
                     )}
                   </div>
 
-                  {['ADMIN', 'MANAGER'].includes(user?.role) && (
+                  {['ADMIN', 'CEO', 'MANAGER'].includes(user?.role) && (
                     <div className="flex shrink-0 gap-2">
                       <button
                         type="button"
@@ -4267,7 +4325,7 @@ const handleInternalNoteDelete = async (note) => {
                 </p>
               </div>
 
-              {['ADMIN', 'MANAGER'].includes(user?.role) && (
+              {['ADMIN', 'CEO', 'MANAGER'].includes(user?.role) && (
                 <button
                   type="button"
                   onClick={(event) => {
@@ -4355,7 +4413,7 @@ const handleInternalNoteDelete = async (note) => {
                           </div>
 
                           {(
-                              ['ADMIN', 'MANAGER'].includes(user?.role) ||
+                              ['ADMIN', 'CEO', 'MANAGER'].includes(user?.role) ||
                               (
                                 user?.role === 'EMPLOYEE' &&
                                 section.type === 'INTERNAL_SUBMISSION'
@@ -4405,7 +4463,7 @@ const handleInternalNoteDelete = async (note) => {
 
                                     {isEmployeeDocumentResponsibility(document) && (
                                       <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700">
-                                        My Responsibility
+                                        Tender Team
                                       </span>
                                     )}
                                   </div>
@@ -4488,7 +4546,7 @@ const handleInternalNoteDelete = async (note) => {
                                       </button>
                                     </>
                                   )}
-                                  {['ADMIN', 'MANAGER',].includes(user?.role) && (
+                                  {['ADMIN', 'CEO', 'MANAGER'].includes(user?.role) && (
 
                                     <>
                                       <button
@@ -4544,48 +4602,75 @@ const handleInternalNoteDelete = async (note) => {
             View the employees currently assigned to this
             tender and manage tender responsibilities.
           </p>
-          {['ADMIN', 'MANAGER'].includes(user?.role) && (
+          {['ADMIN', 'CEO', 'MANAGER'].includes(user?.role) && (
     <div className="border-b border-slate-100 bg-slate-50/60 p-5 sm:p-6">
       <label className="text-sm font-semibold text-slate-700">
         Add Employee to Tender Team
       </label>
 
-      <select
-        value={selectedTeamEmployeeId}
-        onChange={(event) =>
-          setSelectedTeamEmployeeId(event.target.value)
-        }
-        disabled={teamLoading}
-        className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-[#6B3A98] sm:max-w-md"
-      >
-
-        
-
-        
-        <option value="">
-          {teamLoading
-            ? 'Loading employees...'
-            : 'Select an employee'}
-        </option>
-
-      {assignableEmployees
-      .filter(
-        (employee) =>
-          !assignments.some(
-            (assignment) =>
-              Number(assignment.user_id) ===
-              Number(employee.id)
-          )
-      )
-      .map((employee) => (
-        <option
-          key={employee.id}
-          value={employee.id}
-        >
-          {employee.name}
-        </option>
-      ))}
-      </select>
+      <div className="relative mt-2 w-full sm:max-w-lg">
+        <div className="relative">
+          <Search size={17} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input
+            type="search"
+            value={teamEmployeeSearch}
+            onFocus={() => setTeamEmployeeDropdownOpen(true)}
+            onChange={(event) => {
+              setTeamEmployeeSearch(event.target.value)
+              setSelectedTeamEmployeeId('')
+              setTeamEmployeeDropdownOpen(true)
+              setTeamError('')
+            }}
+            disabled={teamLoading || assigningTeamEmployee}
+            placeholder={teamLoading ? 'Loading employees...' : 'Search employee name or department...'}
+            aria-label="Search tender team employees"
+            aria-expanded={teamEmployeeDropdownOpen}
+            className="h-11 w-full rounded-xl border border-slate-300 bg-white py-2 pl-10 pr-10 text-sm outline-none focus:border-[#6B3A98]"
+          />
+          <button type="button" onClick={() => setTeamEmployeeDropdownOpen((open) => !open)}
+            disabled={teamLoading || assigningTeamEmployee}
+            aria-label="Toggle employee choices"
+            className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg px-2 py-1 text-slate-500 hover:bg-slate-100">
+            {teamEmployeeDropdownOpen ? '▲' : '▼'}
+          </button>
+        </div>
+        {teamEmployeeDropdownOpen && !teamLoading && (
+          <div className="mt-2 max-h-64 overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-lg">
+            {assignableEmployees.filter((employee) =>
+              `${employee.name || ''} ${employee.department || ''}`.toLowerCase().includes(teamEmployeeSearch.trim().toLowerCase())
+            ).length === 0 ? (
+              <p className="p-4 text-sm text-slate-500">No matching employees found.</p>
+            ) : assignableEmployees.filter((employee) =>
+              `${employee.name || ''} ${employee.department || ''}`.toLowerCase().includes(teamEmployeeSearch.trim().toLowerCase())
+            ).map((employee) => {
+              const alreadyAssigned = assignments.some((assignment) =>
+                Number(assignment.user_id ?? assignment.employee_id) === Number(employee.id)
+              )
+              const count = Number(employee.active_tender_count)
+              const hasCount = employee.active_tender_count != null && Number.isFinite(count)
+              return (
+                <button key={employee.id} type="button" disabled={alreadyAssigned}
+                  onClick={() => {
+                    setSelectedTeamEmployeeId(String(employee.id))
+                    setTeamEmployeeSearch(employee.name || '')
+                    setTeamEmployeeDropdownOpen(false)
+                    setTeamError('')
+                  }}
+                  className="flex w-full items-center justify-between gap-3 border-b border-slate-100 px-4 py-3 text-left last:border-b-0 hover:bg-purple-50 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:opacity-60">
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-semibold text-slate-800">{employee.name}</span>
+                    {employee.department && <span className="block truncate text-xs text-slate-500">{employee.department}</span>}
+                  </span>
+                  <span className="shrink-0 text-right">
+                    <span className="block text-xs font-semibold text-[#6B3A98]">{hasCount ? `${count} active ${count === 1 ? 'tender' : 'tenders'}` : 'Count unavailable'}</span>
+                    {alreadyAssigned && <span className="block text-xs text-slate-500">Already assigned</span>}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        )}
+      </div>
 
       <button
         type="button"
@@ -4666,7 +4751,7 @@ const handleInternalNoteDelete = async (note) => {
                   </p>
                 </div>
 
-                {['ADMIN', 'MANAGER'].includes(user?.role) && (
+                {['ADMIN', 'CEO', 'MANAGER'].includes(user?.role) && (
                   <button
                     type="button"
                     onClick={() =>
@@ -4698,6 +4783,103 @@ const handleInternalNoteDelete = async (note) => {
 
 
   {/* Internal Notes */}
+{activeTab === 'review' && (
+  <section className="space-y-6">
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <h2 className="text-xl font-bold text-slate-900">Review & Approval</h2>
+        <p className="mt-1 text-sm text-slate-500">Completed requirements and compliance items enter review independently.</p>
+      </div>
+      <button type="button" onClick={loadReviewData} disabled={reviewLoading}
+        className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold disabled:opacity-50">
+        {reviewLoading ? 'Refreshing...' : 'Refresh review queue'}
+      </button>
+    </div>
+    {reviewError && <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{reviewError}</div>}
+    {reviewLoading && !reviewData && <p className="text-sm text-slate-500">Loading review queue...</p>}
+    {reviewData && (
+      <div className="space-y-6">
+        {[
+          ['Requirements', 'requirement', reviewData.requirements || []],
+          ['Compliance', 'compliance', reviewData.compliance || []],
+        ].map(([heading, kind, items]) => (
+          <div key={kind} className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+            <div className="border-b border-slate-200 bg-slate-50 px-5 py-4">
+              <h3 className="font-bold text-slate-900">{heading} ({items.length})</h3>
+            </div>
+            {items.length === 0 ? <p className="p-5 text-sm text-slate-500">No items found.</p> : (
+              <div className="divide-y divide-slate-200">
+                {items.map((item) => {
+                  const status = item.review_status || 'NOT_SUBMITTED'
+                  const awaiting = item.status === 'COMPLETED' && status === 'AWAITING_REVIEW'
+                  const busy = reviewAction === `${kind}-${item.id}`
+                  return (
+                    <div key={item.id} className="space-y-3 p-5">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <h4 className="font-semibold text-slate-900">{item.title}</h4>
+                          <p className="mt-1 text-xs text-slate-500">Work: {(item.status || '').replaceAll('_', ' ')} {Number(item.is_mandatory) === 1 ? '· Mandatory' : '· Optional'}</p>
+                        </div>
+                        <span className={`rounded-full px-3 py-1 text-xs font-bold ${status === 'APPROVED' ? 'bg-emerald-100 text-emerald-700' : status === 'AWAITING_REVIEW' ? 'bg-amber-100 text-amber-700' : status === 'CHANGES_REQUESTED' ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-600'}`}>
+                          {status.replaceAll('_', ' ')}
+                        </span>
+                      </div>
+                      {item.description && <p className="text-sm text-slate-600">{item.description}</p>}
+                      {item.review_comment && <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-700"><strong>Reviewer comment:</strong> {item.review_comment}</p>}
+                      <div className="space-y-1">
+                        <p className="text-xs font-semibold text-slate-600">Evidence ({(item.evidence || []).length})</p>
+                        {(item.evidence || []).map((doc) => (
+                          <div key={doc.id} className="text-sm text-slate-600">
+                            {doc.title || doc.file_name} {doc.uploaded_by_name ? `· Uploaded by ${doc.uploaded_by_name}` : ''}
+                            {(doc.mime_type === 'application/pdf' || doc.mime_type?.startsWith('image/')) && (
+                              <button type="button" className="ml-3 font-semibold text-purple-700 underline" disabled={previewingDocumentId === doc.id} onClick={() => handlePreviewDocument(doc)}>
+                                {previewingDocumentId === doc.id ? 'Opening...' : 'Preview'}
+                              </button>
+                            )}
+                            <button type="button" className="ml-3 font-semibold text-purple-700 underline" onClick={() => handleDownloadDocument(doc)}>Download</button>
+                          </div>
+                        ))}
+                        {!(item.evidence || []).length && <p className="text-xs text-amber-700">No linked evidence uploaded.</p>}
+                      </div>
+                      {canReviewTender && awaiting && (
+                        <div className="flex flex-wrap gap-2">
+                          <button type="button" disabled={busy || !(item.evidence || []).length}
+                            onClick={() => decideReviewItem(kind, item, 'APPROVED')}
+                            className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">{busy ? 'Saving...' : 'Approve'}</button>
+                          <button type="button" disabled={busy} onClick={() => { setReviewChangesTarget({ kind, item }); setReviewComment('') }}
+                            className="rounded-lg border border-red-300 px-4 py-2 text-sm font-semibold text-red-700 disabled:opacity-40">Request Changes</button>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    )}
+    {reviewChangesTarget && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !reviewAction) setReviewChangesTarget(null) }}>
+        <form role="dialog" aria-modal="true" aria-labelledby="review-change-title"
+          onSubmit={(event) => { event.preventDefault(); if (reviewComment.trim()) decideReviewItem(reviewChangesTarget.kind, reviewChangesTarget.item, 'CHANGES_REQUESTED', reviewComment.trim()) }}
+          className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
+          <h3 id="review-change-title" className="text-lg font-bold text-slate-900">Request changes</h3>
+          <p className="mt-1 text-sm text-slate-600">{reviewChangesTarget.item.title}</p>
+          <label htmlFor="review-change-comment" className="mt-5 block text-sm font-semibold text-slate-800">Required reviewer comment</label>
+          <textarea id="review-change-comment" required autoFocus value={reviewComment} onChange={(event) => setReviewComment(event.target.value)} rows={4}
+            className="mt-2 w-full rounded-xl border border-slate-300 bg-white p-3 text-sm" placeholder="Describe what must be corrected" />
+          {reviewError && <p role="alert" className="mt-3 text-sm text-red-700">{reviewError}</p>}
+          <div className="mt-5 flex justify-end gap-2">
+            <button type="button" disabled={Boolean(reviewAction)} onClick={() => setReviewChangesTarget(null)} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold">Cancel</button>
+            <button type="submit" disabled={Boolean(reviewAction) || !reviewComment.trim()} className="rounded-lg bg-red-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{reviewAction ? 'Sending...' : 'Send changes request'}</button>
+          </div>
+        </form>
+      </div>
+    )}
+  </section>
+)}
+
 {activeTab === 'notes' && (
   <div className="mt-6">
     <section className="flex min-h-[600px] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -4766,7 +4948,7 @@ const handleInternalNoteDelete = async (note) => {
                 Number(user?.id)
 
                 const canManageNote =
-                ['ADMIN', 'MANAGER'].includes(user?.role) ||
+                ['ADMIN', 'CEO', 'MANAGER'].includes(user?.role) ||
                 (user?.role === 'EMPLOYEE' && isOwnNote)
 
               return (
@@ -4973,7 +5155,7 @@ const handleInternalNoteDelete = async (note) => {
       </div>
 
       {/* Message Composer */}
-      {['ADMIN', 'MANAGER', 'EMPLOYEE'].includes(
+      {['ADMIN', 'CEO', 'MANAGER', 'EMPLOYEE'].includes(
         user?.role
       ) && (
         <form
@@ -5058,16 +5240,38 @@ const handleInternalNoteDelete = async (note) => {
           </div>
         </form>
       )}
-
-      {/* CEO read-only indicator */}
-      {user?.role === 'CEO' && (
-        <div className="border-t border-slate-200 bg-slate-50 px-5 py-3 text-center text-xs font-medium text-slate-500">
-          Internal notes are available in read-only mode.
-        </div>
-      )}
     </section>
   </div>
 )}
+
+        {activeTab === 'submission' && (
+          <section className="mt-6 space-y-5 rounded-2xl border border-slate-200 bg-white p-6">
+            <div className="flex items-center justify-between gap-3">
+              <div><h2 className="text-xl font-bold">Final Submission</h2><p className="text-sm text-slate-500">All mandatory items must be approved with current evidence.</p></div>
+              <button type="button" onClick={loadSubmission} disabled={submissionLoading} className="rounded-lg border px-4 py-2 text-sm font-semibold">Refresh</button>
+            </div>
+            {submissionError && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{submissionError}</p>}
+            {submissionLoading && <p className="text-sm text-slate-500">Checking readiness...</p>}
+            {submissionData && <>
+              <p className={`rounded-lg p-3 font-semibold ${submissionData.readiness?.ready ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'}`}>
+                {submissionData.tender?.status === 'SUBMITTED' ? 'Tender already submitted' : submissionData.readiness?.ready ? 'Ready for final submission' : 'Not ready for final submission'}
+              </p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {['requirements','compliance'].map(kind => <div key={kind} className="rounded-xl border p-4"><p className="text-sm capitalize">{kind}</p><p className="text-2xl font-bold">{submissionData.readiness?.summary?.[kind]?.approved || 0} / {submissionData.readiness?.summary?.[kind]?.total || 0}</p><p className="text-xs text-slate-500">Mandatory items approved</p></div>)}
+              </div>
+              {(submissionData.readiness?.blockers || []).length > 0 && <div className="rounded-xl border border-amber-200 p-4"><h3 className="font-bold">Items to resolve</h3><ul className="mt-2 list-disc space-y-1 pl-5 text-sm">{submissionData.readiness.blockers.map((item,i) => <li key={`${item.kind}-${item.id || i}`}>{item.title ? `${item.title}: ` : ''}{item.reason}</li>)}</ul></div>}
+              <div className="rounded-xl border p-4"><h3 className="font-bold">Final submission documents <span className="text-sm font-normal text-slate-500">(Optional)</span></h3><p className="mt-1 text-xs text-slate-500">No final document is required for submission. If needed, you can upload an unlinked Internal Submission document in the Documents tab.</p>
+                {(submissionData.finalSubmissionDocuments || []).map(doc => <div key={doc.id} className="mt-2 flex flex-wrap items-center gap-3 text-sm"><span>{doc.title || doc.file_name}</span>{(doc.mime_type === 'application/pdf' || doc.mime_type?.startsWith('image/')) && <button type="button" onClick={() => handlePreviewDocument(doc)} className="font-semibold text-purple-700 underline">Preview</button>}<button type="button" onClick={() => handleDownloadDocument(doc)} className="font-semibold text-purple-700 underline">Download</button></div>)}
+              </div>
+              {submissionData.tender?.status === 'SUBMITTED' ? <p className="text-sm">Submitted by {submissionData.tender.submitted_by_name || 'authorized user'} on {submissionData.tender.submitted_at ? new Date(submissionData.tender.submitted_at).toLocaleString() : '—'} · Reference: {submissionData.tender.submission_reference || '—'}</p> : canSubmitTender ? (
+                <form onSubmit={handleFinalSubmission} className="space-y-3 rounded-xl border p-4"><h3 className="font-bold">Submission details</h3>
+                  {[['submissionMethod','Submission method'],['submissionLocation','Location'],['submissionReference','Submission reference'],['submissionNotes','Notes']].map(([name,label]) => <label key={name} className="block text-sm font-medium">{label}<input className="mt-1 block w-full rounded-lg border border-slate-300 p-2" value={submissionForm[name]} onChange={e => setSubmissionForm(s => ({...s,[name]:e.target.value}))} required={name === 'submissionMethod' || name === 'submissionReference'} /></label>)}
+                  <button type="submit" disabled={!submissionData.readiness?.ready || submittingTender} className="rounded-lg bg-purple-700 px-5 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">{submittingTender ? 'Submitting...' : 'Confirm Final Submission'}</button>
+                </form>
+              ) : <p className="text-sm text-slate-500">Only Admin or CEO can submit this tender.</p>}
+            </>}
+          </section>
+        )}
 
         {/* Placeholder tabs */}
       {activeTab !== 'overview' &&
@@ -5075,7 +5279,9 @@ const handleInternalNoteDelete = async (note) => {
     activeTab !== 'compliance' &&
     activeTab !== 'documents' && 
         activeTab !== 'team' &&
-        activeTab !== 'notes' &&  (
+        activeTab !== 'notes' &&
+        activeTab !== 'review' &&
+        activeTab !== 'submission' &&  (
           <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm sm:p-12">
             <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-[#6B3A98]/10 text-[#6B3A98]">
               <ActiveTabIcon size={25} />
@@ -5122,7 +5328,7 @@ const handleInternalNoteDelete = async (note) => {
                     onChange={handleDocumentFormChange}
                     className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-[#6B3A98]"
                   >
-                    {['ADMIN', 'MANAGER'].includes(user?.role) && (
+                    {['ADMIN', 'CEO', 'MANAGER'].includes(user?.role) && (
                       <option value="ORIGINAL_TENDER">
                         Original Tender Documents
                       </option>
@@ -5404,31 +5610,6 @@ const handleInternalNoteDelete = async (note) => {
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <label className="text-sm font-semibold text-slate-700">
-                Assign To
-              </label>
-
-              <select
-                name="assignedUserId"
-                value={requirementForm.assignedUserId}
-                onChange={handleRequirementFormChange}
-                className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-[#6B3A98]"
-              >
-                <option value="">
-                  Not assigned
-                </option>
-
-                {assignments.map((assignment) => (
-                  <option
-                  key={assignment.user_id}
-                      value={assignment.user_id}
-                  >
-                    {assignment.employee_name}
-                  </option>
-                ))}
-              </select>
-            </div>
 
             <div>
               <label className="text-sm font-semibold text-slate-700">
@@ -5647,31 +5828,6 @@ const handleInternalNoteDelete = async (note) => {
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <label className="text-sm font-semibold text-slate-700">
-                Assign To
-              </label>
-
-              <select
-                name="assignedUserId"
-                value={complianceForm.assignedUserId}
-                onChange={handleComplianceFormChange}
-                className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-[#6B3A98]"
-              >
-                <option value="">
-                  Not assigned
-                </option>
-
-                {assignments.map((assignment) => (
-                  <option
-                    key={assignment.user_id}
-                    value={assignment.user_id}
-                  >
-                    {assignment.employee_name}
-                  </option>
-                ))}
-              </select>
-            </div>
 
             <div>
               <label className="text-sm font-semibold text-slate-700">

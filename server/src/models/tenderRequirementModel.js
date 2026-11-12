@@ -15,6 +15,11 @@ export const getTenderRequirements = async (tenderId) => {
       tr.description,
       tr.is_mandatory,
       tr.status,
+      tr.review_status,
+      tr.reviewed_by,
+      reviewer.name AS reviewed_by_name,
+      tr.reviewed_at,
+      tr.review_comment,
       tr.assigned_user_id,
       assigned_user.name AS assigned_user_name,
       assigned_user.email AS assigned_user_email,
@@ -30,6 +35,8 @@ export const getTenderRequirements = async (tenderId) => {
       tr.created_at,
       tr.updated_at
     FROM tender_requirements tr
+
+    LEFT JOIN users reviewer ON reviewer.id = tr.reviewed_by
 
     LEFT JOIN users assigned_user
       ON tr.assigned_user_id = assigned_user.id
@@ -72,6 +79,11 @@ export const getTenderRequirementById = async (
       tr.description,
       tr.is_mandatory,
       tr.status,
+      tr.review_status,
+      tr.reviewed_by,
+      reviewer.name AS reviewed_by_name,
+      tr.reviewed_at,
+      tr.review_comment,
       tr.assigned_user_id,
       assigned_user.name AS assigned_user_name,
       assigned_user.email AS assigned_user_email,
@@ -87,6 +99,8 @@ export const getTenderRequirementById = async (
       tr.created_at,
       tr.updated_at
     FROM tender_requirements tr
+
+    LEFT JOIN users reviewer ON reviewer.id = tr.reviewed_by
 
     LEFT JOIN users assigned_user
       ON tr.assigned_user_id = assigned_user.id
@@ -191,7 +205,8 @@ export const updateTenderRequirementById = async (
       due_date = ?,
       sort_order = ?,
       completed_by = ?,
-      completed_at = ?
+      completed_at = ?,
+          review_status = CASE WHEN ? = 'COMPLETED' THEN 'AWAITING_REVIEW' ELSE 'NOT_SUBMITTED' END
     WHERE id = ?
       AND tender_id = ?
       AND is_active = 1
@@ -207,6 +222,7 @@ export const updateTenderRequirementById = async (
       sortOrder ?? 0,
       completedBy || null,
       completedAt || null,
+      status,
       requirementId,
       tenderId,
     ]

@@ -16,9 +16,6 @@
 
   import pool from '../config/db.js'
 
-  import {
-    findUserById,
-  } from '../models/userModel.js'
 
   import {
     isUserAssignedToTender,
@@ -87,72 +84,6 @@
     }
 
     return defaultValue
-  }
-
-  const validateAssignedEmployee = async ({
-    tenderId,
-    assignedUserId,
-  }) => {
-    if (
-      assignedUserId === undefined ||
-      assignedUserId === null ||
-      assignedUserId === ''
-    ) {
-      return {
-        userId: null,
-      }
-    }
-
-    const userId =
-      parsePositiveId(assignedUserId)
-
-    if (!userId) {
-      return {
-        error:
-          'Assigned employee ID is invalid.',
-      }
-    }
-
-    const user =
-      await findUserById(userId)
-
-    if (!user) {
-      return {
-        error:
-          'Assigned employee was not found.',
-      }
-    }
-
-    if (user.role !== 'EMPLOYEE') {
-      return {
-        error:
-          'Compliance items can only be assigned to employees.',
-      }
-    }
-
-    if (user.status !== 'ACTIVE') {
-      return {
-        error:
-          'Assigned employee must be active.',
-      }
-    }
-
-    const assigned =
-      await isUserAssignedToTender(
-        tenderId,
-        userId
-      )
-
-    if (!assigned) {
-      return {
-        error:
-          'Employee must be assigned to the tender before assigning this compliance item.',
-      }
-    }
-
-    return {
-      userId,
-    }
   }
 
   const getTenderOrFail = async (
@@ -532,12 +463,7 @@
           })
         }
 
-        const assignment =
-          await validateAssignedEmployee({
-            tenderId:
-              tenderResult.tenderId,
-            assignedUserId,
-          })
+        const assignment = { userId: null }
 
         if (assignment.error) {
           return res.status(400).json({
@@ -782,12 +708,7 @@
           })
         }
 
-        const assignment =
-          await validateAssignedEmployee({
-            tenderId:
-              tenderResult.tenderId,
-            assignedUserId,
-          })
+        const assignment = { userId: null }
 
         if (assignment.error) {
           return res.status(400).json({
@@ -989,13 +910,12 @@
         // Employee can update only a compliance
         // item specifically assigned to them.
         if (
-          Number(existing.assigned_user_id) !==
-          Number(req.user.id)
+          !(await isUserAssignedToTender(tenderResult.tenderId, req.user.id))
         ) {
           return res.status(403).json({
             success: false,
             message:
-              'You can only update compliance items assigned to you.',
+              'You must be assigned to this tender to update compliance progress.',
           })
         }
 
@@ -1058,8 +978,7 @@
                   existing.is_mandatory
                 ) === 1,
               status,
-              assignedUserId:
-                existing.assigned_user_id,
+              assignedUserId: null,
               dueDate:
                 existing.due_date || null,
               notes:

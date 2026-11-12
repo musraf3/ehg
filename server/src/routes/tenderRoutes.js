@@ -64,18 +64,35 @@ import {
   tenderDocumentUpload,
 } from '../config/documentUpload.js'
 
+import { getTenderSubmission, submitTender } from '../controllers/tenderSubmissionController.js'
 import { protect } from '../middleware/authMiddleware.js'
 import { requireRole } from '../middleware/roleMiddleware.js'
+
+import {
+  getTenderReviewDashboard,
+  reviewTenderRequirement,
+  reviewTenderCompliance,
+} from '../controllers/tenderReviewController.js'
 
 const router = express.Router()
 
 // All tender routes require authentication
 router.use(protect)
 
+// Phase 2: Individual item review. Final submission is Phase 3.
+router.get('/:tenderId/review',
+  requireRole('ADMIN', 'CEO', 'MANAGER'), requireTenderAccess, getTenderReviewDashboard)
+router.patch('/:tenderId/review/requirements/:requirementId',
+  requireRole('ADMIN', 'CEO', 'MANAGER'), requireTenderAccess, reviewTenderRequirement)
+router.patch('/:tenderId/review/compliance/:complianceItemId',
+  requireRole('ADMIN', 'CEO', 'MANAGER'), requireTenderAccess, reviewTenderCompliance)
+
+
+
 
 router.get(
   '/assignable-employees',
-  requireRole('ADMIN', 'MANAGER'),
+  requireRole('ADMIN', 'CEO', 'MANAGER'),
   listAssignableEmployees
 )
 
@@ -115,17 +132,23 @@ router.get(
 // ADMIN + MANAGER can create requirements
 router.post(
   '/:tenderId/requirements',
-  requireRole('ADMIN', 'MANAGER'),
+  requireRole('ADMIN', 'CEO', 'MANAGER'),
   createRequirement
 )
 
 // ADMIN + MANAGER can update requirements
 router.put(
   '/:tenderId/requirements/:requirementId',
-  requireRole('ADMIN', 'MANAGER'),
+  requireRole('ADMIN', 'CEO', 'MANAGER'),
   updateRequirement
 )
 
+
+router.delete(
+  '/:tenderId/requirements/:requirementId',
+  requireRole('ADMIN', 'CEO', 'MANAGER'),
+  removeRequirement
+)
 
 router.get(
   '/:tenderId/compliance',
@@ -143,6 +166,7 @@ router.get(
   '/:tenderId/compliance/template-options',
   requireRole(
     'ADMIN',
+    'CEO',
     'MANAGER'
   ),
   getComplianceTemplateOptions
@@ -150,25 +174,25 @@ router.get(
 
 router.post(
   '/:tenderId/compliance/apply-template',
-  requireRole('ADMIN', 'MANAGER'),
+  requireRole('ADMIN', 'CEO', 'MANAGER'),
   applyDefaultComplianceTemplate
 )
 
 router.post(
   '/:tenderId/compliance',
-  requireRole('ADMIN', 'MANAGER'),
+  requireRole('ADMIN', 'CEO', 'MANAGER'),
   createComplianceItem
 )
 
 router.put(
   '/:tenderId/compliance/:complianceItemId',
-  requireRole('ADMIN', 'MANAGER'),
+  requireRole('ADMIN', 'CEO', 'MANAGER'),
   updateComplianceItem
 )
 
 router.delete(
   '/:tenderId/compliance/:complianceItemId',
-  requireRole('ADMIN', 'MANAGER'),
+  requireRole('ADMIN', 'CEO', 'MANAGER'),
   removeComplianceItem
 )
 
@@ -200,6 +224,7 @@ router.post(
   '/:tenderId/documents',
   requireRole(
     'ADMIN',
+    'CEO',
     'MANAGER',
     'EMPLOYEE'
   ),
@@ -215,6 +240,7 @@ router.put(
   '/:tenderId/documents/:documentId',
   requireRole(
     'ADMIN',
+    'CEO',
     'MANAGER',
     'EMPLOYEE'
   ),
@@ -254,6 +280,7 @@ router.delete(
   '/:tenderId/documents/:documentId',
   requireRole(
     'ADMIN',
+    'CEO',
     'MANAGER',
     'EMPLOYEE'
   ),
@@ -279,6 +306,7 @@ router.post(
   '/:tenderId/internal-notes',
   requireRole(
     'ADMIN',
+    'CEO',
     'MANAGER',
     'EMPLOYEE'
   ),
@@ -290,6 +318,7 @@ router.put(
   '/:tenderId/internal-notes/:noteId',
   requireRole(
     'ADMIN',
+    'CEO',
     'MANAGER',
     'EMPLOYEE'
   ),
@@ -300,6 +329,7 @@ router.delete(
   '/:tenderId/internal-notes/:noteId',
   requireRole(
     'ADMIN',
+    'CEO',
     'MANAGER',
     'EMPLOYEE'
   ),
@@ -329,6 +359,10 @@ router.get(
 
 
 
+// Final Submission: read-only for all tender members; only Admin/CEO may submit.
+router.get('/:tenderId/submission', requireRole('ADMIN','CEO','MANAGER','EMPLOYEE'), requireTenderAccess, getTenderSubmission)
+router.patch('/:tenderId/submission', requireRole('ADMIN','CEO'), requireTenderAccess, submitTender)
+
 // ADMIN + CEO +MANAGER can view tender details
 router.get(
   '/:id',
@@ -354,28 +388,28 @@ router.patch(
 // ADMIN + MANAGER can create tenders
 router.post(
   '/',
-  requireRole('ADMIN', 'MANAGER'),
+  requireRole('ADMIN', 'CEO', 'MANAGER'),
   createNewTender
 )
 
 // ADMIN + MANAGER can update tenders
 router.put(
   '/:id',
-  requireRole('ADMIN', 'MANAGER'),
+  requireRole('ADMIN', 'CEO', 'MANAGER'),
   updateTender
 )
 
 // ADMIN + MANAGER can archive tenders
 router.delete(
   '/:id',
-  requireRole('ADMIN', 'MANAGER'),
+  requireRole('ADMIN', 'CEO', 'MANAGER'),
   archiveTender
 )
 
 // ADMIN + MANAGER can assign employees
 router.post(
   '/:id/assign',
-  requireRole('ADMIN', 'MANAGER'),
+  requireRole('ADMIN', 'CEO', 'MANAGER'),
   assignTender
 )
 
@@ -383,7 +417,7 @@ router.post(
 
 router.delete(
   '/:id/assign/:userId',
-  requireRole('ADMIN', 'MANAGER'),
+  requireRole('ADMIN', 'CEO', 'MANAGER'),
   removeTenderTeamMember
 )
 

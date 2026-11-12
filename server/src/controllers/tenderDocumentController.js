@@ -11,6 +11,7 @@ import {
 } from '../models/tenderDocumentModel.js'
 
 import { getTenderById } from '../models/tenderModel.js'
+import { isUserAssignedToTender } from '../models/tenderRequirementModel.js'
 
 import { createTenderActivity } from '../models/tenderActivityModel.js'
 
@@ -151,54 +152,13 @@ const getDocumentLinkContext = async ({
   }
 }
 
-const isRequirementAssignedToEmployee = async (
-  requirementId,
-  tenderId,
-  userId
-) => {
-  if (!requirementId) {
-    return true
-  }
-
-  const [rows] = await pool.query(
-    `
-      SELECT id
-      FROM tender_requirements
-      WHERE id = ?
-        AND tender_id = ?
-        AND assigned_user_id = ?
-        AND is_active = 1
-      LIMIT 1
-    `,
-    [requirementId, tenderId, userId]
-  )
-
-  return rows.length > 0
-}
-
-const isComplianceAssignedToEmployee = async (
-  complianceItemId,
-  tenderId,
-  userId
-) => {
-  if (!complianceItemId) {
-    return true
-  }
-
-  const [rows] = await pool.query(
-    `
-      SELECT id
-      FROM tender_compliance_items
-      WHERE id = ?
-        AND tender_id = ?
-        AND assigned_user_id = ?
-        AND is_active = 1
-      LIMIT 1
-    `,
-    [complianceItemId, tenderId, userId]
-  )
-
-  return rows.length > 0
+const ensureTenderTeamMember = async (req, res, tenderId, filePath = null) => {
+  if (req.user.role !== 'EMPLOYEE') return true
+  const assigned = await isUserAssignedToTender(tenderId, req.user.id)
+  if (assigned) return true
+  removePhysicalFile(filePath)
+  res.status(403).json({ success: false, message: 'You must be assigned to this tender to manage evidence.' })
+  return false
 }
 
 export const listTenderDocuments = async (
@@ -225,6 +185,8 @@ export const listTenderDocuments = async (
         message: 'Tender not found.',
       })
     }
+
+    if (!(await ensureTenderTeamMember(req, res, tenderId, null))) return
 
     const [documents, summary] = await Promise.all([
       getTenderDocuments(tenderId),
@@ -278,6 +240,8 @@ export const uploadTenderDocument = async (
         message: 'Tender not found.',
       })
     }
+
+    if (!(await ensureTenderTeamMember(req, res, tenderId, req.file?.path))) return
 
     if (!req.file) {
       return res.status(400).json({
@@ -409,47 +373,11 @@ if (
     }
 
 
-    // Employees may link evidence only to work
-// that is specifically assigned to them.
-if (req.user.role === 'EMPLOYEE') {
-  if (parsedRequirementId) {
-    const assignedToEmployee =
-      await isRequirementAssignedToEmployee(
-        parsedRequirementId,
-        tenderId,
-        req.user.id
-      )
-
-    if (!assignedToEmployee) {
+    // All assigned tender employees may upload evidence for any linked item.
+    if (req.user.role === 'EMPLOYEE' && !parsedRequirementId && !parsedComplianceItemId) {
       removePhysicalFile(req.file.path)
-
-      return res.status(403).json({
-        success: false,
-        message:
-          'You can only upload evidence for requirements assigned to you.',
-      })
+      return res.status(403).json({ success: false, message: 'Employee evidence must be linked to a requirement or compliance item.' })
     }
-  }
-
-  if (parsedComplianceItemId) {
-    const assignedToEmployee =
-      await isComplianceAssignedToEmployee(
-        parsedComplianceItemId,
-        tenderId,
-        req.user.id
-      )
-
-    if (!assignedToEmployee) {
-      removePhysicalFile(req.file.path)
-
-      return res.status(403).json({
-        success: false,
-        message:
-          'You can only upload evidence for compliance items assigned to you.',
-      })
-    }
-  }
-}
 
     const document = await createTenderDocument({
       tenderId,
@@ -575,6 +503,8 @@ export const editTenderDocument = async (
         message: 'Tender not found.',
       })
     }
+
+    if (!(await ensureTenderTeamMember(req, res, tenderId, req.file?.path))) return
 
     const existing =
   await getTenderDocumentById(documentId)
@@ -727,63 +657,10 @@ if (
       })
     }
 
-    // --------------------------------------------------
-// Employee linked responsibility security
-// --------------------------------------------------
-if (req.user.role === 'EMPLOYEE') {
-  // Employee evidence must remain linked to a
-  // requirement or compliance item.
-  if (
-    !parsedRequirementId &&
-    !parsedComplianceItemId
-  ) {
-    removePhysicalFile(req.file?.path)
-
-    return res.status(403).json({
-      success: false,
-      message:
-        'Employee evidence must remain linked to an assigned requirement or compliance item.',
-    })
-  }
-
-  if (parsedRequirementId) {
-    const assignedToEmployee =
-      await isRequirementAssignedToEmployee(
-        parsedRequirementId,
-        tenderId,
-        req.user.id
-      )
-
-    if (!assignedToEmployee) {
+    if (req.user.role === 'EMPLOYEE' && !parsedRequirementId && !parsedComplianceItemId) {
       removePhysicalFile(req.file?.path)
-
-      return res.status(403).json({
-        success: false,
-        message:
-          'You can only edit evidence for requirements assigned to you.',
-      })
+      return res.status(403).json({ success: false, message: 'Employee evidence must remain linked to a requirement or compliance item.' })
     }
-  }
-
-  if (parsedComplianceItemId) {
-    const assignedToEmployee =
-      await isComplianceAssignedToEmployee(
-        parsedComplianceItemId,
-        tenderId,
-        req.user.id
-      )
-
-    if (!assignedToEmployee) {
-      removePhysicalFile(req.file?.path)
-
-      return res.status(403).json({
-        success: false,
-        message:
-          'You can only edit evidence for compliance items assigned to you.',
-      })
-    }
-  }
-}
 
 const previousLinkContext =
   await getDocumentLinkContext({
@@ -953,6 +830,8 @@ export const downloadTenderDocument = async (
       })
     }
 
+    if (!(await ensureTenderTeamMember(req, res, tenderId, null))) return
+
     const document =
       await getTenderDocumentById(documentId)
 
@@ -1024,6 +903,8 @@ export const previewTenderDocument = async (
         message: 'Tender not found.',
       })
     }
+
+    if (!(await ensureTenderTeamMember(req, res, tenderId, null))) return
 
     const document =
       await getTenderDocumentById(documentId)
@@ -1107,6 +988,8 @@ export const removeTenderDocument = async (
       })
     }
 
+    if (!(await ensureTenderTeamMember(req, res, tenderId, null))) return
+
     const document =
   await getTenderDocumentById(documentId)
 
@@ -1147,53 +1030,9 @@ if (req.user.role === 'EMPLOYEE') {
     })
   }
 
-  // Employee evidence must still belong to work
-  // currently assigned to that employee.
-  if (document.requirement_id) {
-    const assignedToEmployee =
-      await isRequirementAssignedToEmployee(
-        document.requirement_id,
-        tenderId,
-        req.user.id
-      )
-
-    if (!assignedToEmployee) {
-      return res.status(403).json({
-        success: false,
-        message:
-          'You can only remove evidence for requirements assigned to you.',
-      })
-    }
-  }
-
-  if (document.compliance_item_id) {
-    const assignedToEmployee =
-      await isComplianceAssignedToEmployee(
-        document.compliance_item_id,
-        tenderId,
-        req.user.id
-      )
-
-    if (!assignedToEmployee) {
-      return res.status(403).json({
-        success: false,
-        message:
-          'You can only remove evidence for compliance items assigned to you.',
-      })
-    }
-  }
-
-  // Contextual employee evidence should remain linked
-  // to either a requirement or compliance responsibility.
-  if (
-    !document.requirement_id &&
-    !document.compliance_item_id
-  ) {
-    return res.status(403).json({
-      success: false,
-      message:
-        'Only evidence linked to your assigned responsibility can be removed here.',
-    })
+  // The uploader may remove their own evidence while still assigned to the tender.
+  if (!document.requirement_id && !document.compliance_item_id) {
+    return res.status(403).json({ success: false, message: 'Only linked evidence can be removed by employees.' })
   }
 }
 

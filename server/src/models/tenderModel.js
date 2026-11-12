@@ -202,8 +202,8 @@ export const createTender = async ({
   internalOwnerId,
   submittedAt,
   createdBy,
-}) => {
-  const [resultRow] = await pool.query(
+}, db = pool) => {
+  const [resultRow] = await db.query(
     `
     INSERT INTO tenders (
       company_id,
@@ -257,6 +257,28 @@ export const createTender = async ({
   )
 
   return resultRow.insertId
+}
+
+// Create the tender and all its initial assignments atomically.
+export const createTenderWithAssignments = async (tenderData, employeeIds, assignedBy) => {
+  const connection = await pool.getConnection()
+  try {
+    await connection.beginTransaction()
+    const tenderId = await createTender(tenderData, connection)
+    for (const userId of employeeIds) {
+      await connection.query(
+        'INSERT INTO assignments (tender_id, user_id, assigned_by) VALUES (?, ?, ?)',
+        [tenderId, userId, assignedBy]
+      )
+    }
+    await connection.commit()
+    return tenderId
+  } catch (error) {
+    await connection.rollback()
+    throw error
+  } finally {
+    connection.release()
+  }
 }
 
 export const updateTenderById = async (
